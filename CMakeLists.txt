@@ -1,14 +1,29 @@
-INCLUDE_DIRECTORIES(${OSG_INCLUDE_DIRS} )
-SET(TARGET_LIBRARIES_VARS OSG_LIBRARY OSGDB_LIBRARY OSGUTIL_LIBRARY OSGVIEWER_LIBRARY OPENTHREADS_LIBRARY)
+PROJECT(OSGEARTH_MYPROJ)
 
-SET(TARGET_SRC osgearth_tle.cpp mysatellite.cpp)
+SET(OSGCORE_BUNDLED TRUE)
 
-#### end var setup  ###
-SETUP_APPLICATION(osgearth_tle)
-set(INCLUDEDIR ${PROJECT_SOURCE_DIR}/orbittools/core ${PROJECT_SOURCE_DIR}/orbittools/orbit)
-MESSAGE("mytest includedir:" ${INCLUDEDIR})
-INCLUDE_DIRECTORIES(${INCLUDEDIR})
-#LINK_EXTERNAL(orbitTools)
-MESSAGE(mytest_osgearth_tle)
-#target_link_options(mytest_osgearth_mytest PRIVATE -L/usr/lib -lorbitTools)
-target_link_libraries(mytest_osgearth_tle /usr/lib/liborbitTools.so)
+IF(NOT OSGCORE_BUNDLED)
+	FIND_PACKAGE(OSGCORE)
+	IF(OSGCORE_FOUND)
+		INCLUDE(${OSGCORE_USE_FILE})
+	ELSE(OSGCORE_FOUND)
+		MESSAGE(ERROR "OSGCORE needed but NOT FOUND")
+	ENDIF(OSGCORE_FOUND)
+	SET(CMAKE_MODULE_PATH  ${PROJECT_SOURCE_DIR}/../../Macros)
+ENDIF(NOT OSGCORE_BUNDLED)
+
+SET(OPENSCENEGRAPH_APPLICATION_DIR ${PROJECT_SOURCE_DIR})
+
+
+#OpenThreads, osg, osgDB and osgUtil are included elsewhere.
+SET(TARGET_COMMON_LIBRARIES
+    osgEarth
+)
+
+SET(TARGET_DEFAULT_PREFIX "mytest_")
+
+ADD_SUBDIRECTORY(osgearth_mytest)
+
+ADD_SUBDIRECTORY(osgearth_tle)
+
+ADD_SUBDIRECTORY(test)
