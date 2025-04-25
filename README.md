@@ -21,3 +21,4 @@ bin/osgearth_tle tests/simple.earth --tle /osgearth_cache/tle.txt
 
 realize the yaw-steering mode of the satellite according to the paper
 
+![satellite](https://github.com/user-attachments/assets/80a19c67-0e21-4f40-bc7b-be54d0f417e9)
