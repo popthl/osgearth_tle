@@ -1,10 +1,15 @@
 #include "mysatellite.h"
 #include <osgEarth/LabelNode>
-SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg::Geode> geode,time_t t0){
+osg::ref_ptr<osg::MatrixTransform> createRotatingSail(double angle);
+osg::ref_ptr<osg::Node> createColoredCube();
+
+SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg::Geode> geode,time_t t0,osg::Vec3d sunPos){
     mapNode=mapnode;
     sat=sattle;
     satgroup=geode;
-    boxTransform = new osg::MatrixTransform;
+    //boxTransform = new osg::MatrixTransform;
+    pat = new osg::PositionAttitudeTransform();
+    scale = 0.5;
 
     const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
     double Tcycle = 2*PI/sat->Orbit().MeanMotion();
@@ -56,7 +61,10 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     lineWidth->setWidth(2.0f);
     stateSet->setAttributeAndModes(lineWidth, osg::StateAttribute::ON);
 
-    boxwing = createColoredBox(osg::Vec3(0,0,0),osg::Vec3(RADIUS,RADIUS*1,RADIUS*2));
+    //boxwing = createColoredBox(osg::Vec3(0,0,0),osg::Vec3(RADIUS,RADIUS*1,RADIUS*2));
+    //wingangle = 1.0;
+    box = createColoredCube();
+    wing = createRotatingSail(1.0);
 
     Style labelStyle;
     labelStyle.getOrCreate<TextSymbol>()->alignment() = TextSymbol::ALIGN_CENTER_CENTER;
@@ -66,14 +74,59 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     label->setPosition(GeoPoint(geoSRS, pt[0].x(), pt[0].y(),pt[0].z()));
 
     geode->addDrawable(orbit);
-    //geode->addDrawable(boxwing);
     mapNode->addChild(label);
-    osg::Matrix translationMatrix = osg::Matrix::translate((*vertices)[0]);
-    boxTransform->setMatrix(translationMatrix);
-    boxTransform->addChild(boxwing);
-
+   setatt(vertices,sunPos);
+   pat->addChild(box);
+   pat->addChild(wing);
 }
-void SatelliteObj::setposition(time_t t0){
+void SatelliteObj::setatt(osg::ref_ptr<osg::Vec3Array> vertices,osg::Vec3d sunPos)
+{
+    /*printf("sunPos: %lf,%lf,%lf\n",sunPos.x(),sunPos.y(),sunPos.z());
+    printf("satPos: %lf,%lf,%lf\n",(*vertices)[0].x()/(*vertices)[0].length(),(*vertices)[0].y()/(*vertices)[0].length(),(*vertices)[0].z()/(*vertices)[0].length());
+    printf("satPos: %lf,%lf,%lf\n",(*vertices)[10].x()/(*vertices)[10].length(),(*vertices)[10].y()/(*vertices)[10].length(),(*vertices)[10].z()/(*vertices)[10].length());
+*/
+   // rotate satellite body axis z, point to earth center
+   double dot=(*vertices)[0] * osg::Vec3(0,0,1);
+   double r=(*vertices)[0].length();
+   double angle = PI-std::acos(dot/r);
+   pat->setPosition((*vertices)[0]);
+   osg::Vec3 axisz=(*vertices)[0]^osg::Vec3(0,0,1);
+   osg::Quat rotation(angle, axisz);
+   //pat->setAttitude(rotation);
+   osg::Vec3 axisy0 = rotation*osg::Vec3(0,1,0);
+   osg::Vec3 axisx0 = rotation*osg::Vec3(1,0,0);
+   osg::Vec3 axisy=(*vertices)[0]^(*vertices)[10];//orbit normal direction
+   axisy.normalize();
+//    printf("axisy: %lf,%lf,%lf\n",axisy.x(),axisy.y(),axisy.z());
+   dot=axisy*axisy0;
+   double dot1 = axisy*axisx0;
+   angle = std::acos(dot);
+   if(std::isnan(angle))
+	angle=PI;
+   //printf("angle: %f,dot %f dot1:%f\n",angle*180/PI,dot,dot1);
+   if((dot>0 && dot1<0)||(dot<0 && dot1<0))
+	angle=-angle;
+   //body x align to move dirction
+
+   //compute yaw and sail pan rotate angle in yaw steering mode
+   osg::Vec3 orbity=axisy^sunPos;
+   orbity.normalize();
+//    printf("orbity: %lf,%lf,%lf\n",orbity.x(),orbity.y(),orbity.z());
+   double sinu = (*vertices)[0] * orbity/r;
+   double beta = asin(axisy*sunPos);
+   double yaw = atan2(tan(beta),sinu);
+   angle-=yaw;
+   osg::Quat rotatey(angle,(*vertices)[0]);
+   pat->setAttitude(rotation*rotatey);
+   pat->setScale(osg::Vec3(scale*RADIUS, scale*RADIUS, scale*RADIUS));
+   double anglewing=acos(cos(beta)*sqrt(1-sinu*sinu));
+    dot = sunPos*(*vertices)[0];
+   if(dot>0)
+       anglewing=-anglewing;
+//printf("beta %f, yaw %f, sinu %f, anglewing %f\n",beta*180/PI,yaw*180/PI,sinu,anglewing*180/PI);
+   wing->setMatrix(osg::Matrix::rotate(anglewing, 0, 1, 0));
+}
+void SatelliteObj::setposition(time_t t0,osg::Vec3d sunPos){
     //osg::Vec3 lastpos =(* dynamic_cast<osg::Vec3Array*>(orbit->getVertexArray()) )[0];
     const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
     double Tcycle = 2*PI/sat->Orbit().MeanMotion();
@@ -111,9 +164,9 @@ void SatelliteObj::setposition(time_t t0){
     }
     orbit->setVertexArray(vertices);
     label->setPosition(GeoPoint(geoSRS, pt[0].x(), pt[0].y(),pt[0].z()));
-    osg::Matrix translationMatrix = osg::Matrix::translate((*vertices)[0]);
-    boxTransform->setMatrix(translationMatrix);
-
+    //osg::Matrix translationMatrix = osg::Matrix::translate((*vertices)[0]);
+    //boxTransform->setMatrix(translationMatrix);
+    setatt(vertices,sunPos);
 }
 /*osg::ref_ptr<osg::Geode> createsatellite(cSatellite* sat,MapNode* mapNode,time_t t0){
     const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
@@ -226,6 +279,118 @@ void readtlefile(string tlefile, vector<cSatellite*>* satlist){
         }
     printf("read %d satellites\n",satlist->size());
 } 
+// 创建可旋转的帆板
+osg::ref_ptr<osg::MatrixTransform> createRotatingSail(double angle) {
+    osg::ref_ptr<osg::Geometry> geometry = new osg::Geometry;
+
+    // 帆板顶点数据
+    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
+    vertices->push_back(osg::Vec3(0, -1, 0.0f));
+    vertices->push_back(osg::Vec3(-1, -2, 0.0f));
+    vertices->push_back(osg::Vec3(-1, -5, 0.0f));
+    vertices->push_back(osg::Vec3(1, -5, 0.0f));
+    vertices->push_back(osg::Vec3(1, -2, 0.0f));
+    geometry->setVertexArray(vertices);
+    // 帆板颜色
+    osg::ref_ptr<osg::Vec4Array> colors = new osg::Vec4Array;
+    colors->push_back(osg::Vec4(0.5f, 0.5f, 0.5f, 1.0f));  // 白色
+    geometry->setColorArray(colors);
+    geometry->setColorBinding(osg::Geometry::BIND_OVERALL);
+
+    // 帆板索引
+    osg::ref_ptr<osg::DrawElementsUShort> indices = new osg::DrawElementsUShort(osg::PrimitiveSet::POLYGON);
+    for (int i = 0; i < 5;++i){//vertices->getNumElements()+2; ++i) {
+        indices->push_back(i);
+    }
+    geometry->addPrimitiveSet(indices);
+
+    osg::ref_ptr<osg::Geometry> geometry1 = new osg::Geometry;
+    osg::ref_ptr<osg::Vec3Array> vertices1 = new osg::Vec3Array;
+    vertices1->push_back(osg::Vec3(0,  1, 0.0f));
+    vertices1->push_back(osg::Vec3(1,  2, 0.0f));
+    vertices1->push_back(osg::Vec3(1,  5, 0.0f));
+    vertices1->push_back(osg::Vec3(-1, 5, 0.0f));
+    vertices1->push_back(osg::Vec3(-1, 2, 0.0f));
+    geometry1->setVertexArray(vertices1);
+    geometry1->setColorArray(colors);
+    geometry1->setColorBinding(osg::Geometry::BIND_OVERALL);
+    geometry1->addPrimitiveSet(indices);
+
+    osg::ref_ptr<osg::Geode> geode = new osg::Geode;
+    geode->addDrawable(geometry);
+    geode->addDrawable(geometry1);
+
+    osg::ref_ptr<osg::MatrixTransform> transform = new osg::MatrixTransform;
+    transform->setMatrix(osg::Matrix::rotate(angle, 0, 1, 0));
+    transform->addChild(geode);
+
+    /*/ 旋转回调类
+    class RotateCallback : public osg::NodeCallback {
+    public:
+        RotateCallback() : angle(0.0) {}
+        virtual void operator()(osg::Node* node, osg::NodeVisitor* nv) {
+            osg::MatrixTransform* mt = dynamic_cast<osg::MatrixTransform*>(node);
+            if (mt) {
+                angle += 0.001;
+                mt->setMatrix(osg::Matrix::rotate(angle, 0, 1, 0));
+            }
+            traverse(node, nv);
+        }
+    private:
+        double angle;
+    };
+
+    transform->setUpdateCallback(new RotateCallback);*/
+    return transform;
+}
+// 创建六面颜色各异的六面体
+osg::ref_ptr<osg::Node> createColoredCube() {
+    osg::ref_ptr<osg::Geometry> geometry = new osg::Geometry;
+
+    // 顶点数据
+    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
+    vertices->push_back(osg::Vec3(-1.0f, -1.0f, -1.0f));
+    vertices->push_back(osg::Vec3(1.0f, -1.0f, -1.0f));
+    vertices->push_back(osg::Vec3(1.0f, 1.0f, -1.0f));
+    vertices->push_back(osg::Vec3(-1.0f, 1.0f, -1.0f));
+    vertices->push_back(osg::Vec3(-1.0f, -1.0f, 1.0f));
+    vertices->push_back(osg::Vec3(1.0f, -1.0f, 1.0f));
+    vertices->push_back(osg::Vec3(1.0f, 1.0f, 1.0f));
+    vertices->push_back(osg::Vec3(-1.0f, 1.0f, 1.0f));
+    geometry->setVertexArray(vertices);
+
+    // 颜色数据，每个面一种颜色
+    osg::ref_ptr<osg::Vec4Array> colors = new osg::Vec4Array;
+    colors->push_back(osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f));  // 红色
+    colors->push_back(osg::Vec4(0.0f, 1.0f, 0.0f, 1.0f));  // 绿色
+    colors->push_back(osg::Vec4(0.0f, 0.0f, 1.0f, 1.0f));  // 蓝色
+    colors->push_back(osg::Vec4(1.0f, 1.0f, 0.0f, 1.0f));  // 黄色
+    colors->push_back(osg::Vec4(1.0f, 0.0f, 1.0f, 1.0f));  // 紫色
+    colors->push_back(osg::Vec4(0.0f, 1.0f, 1.0f, 1.0f));  // 青色
+    geometry->setColorArray(colors);
+    geometry->setColorBinding(osg::Geometry::BIND_PER_PRIMITIVE_SET);
+
+    // 索引数据，定义每个面的顶点
+    const unsigned int faceIndices[6][4] = {
+        {0, 1, 2, 3},  // 前面
+        {4, 5, 6, 7},  // 后面
+        {0, 3, 7, 4},  // 左面
+        {1, 2, 6, 5},  // 右面
+        {0, 1, 5, 4},  // 底面
+        {2, 3, 7, 6}   // 顶面
+    };
+    for (int i = 0; i < 6; ++i) {
+        osg::ref_ptr<osg::DrawElementsUShort> indices = new osg::DrawElementsUShort(osg::PrimitiveSet::QUADS);
+        for (int j = 0; j < 4; ++j) {
+            indices->push_back(faceIndices[i][j]);
+        }
+        geometry->addPrimitiveSet(indices);
+    }
+
+    osg::ref_ptr<osg::Geode> geode = new osg::Geode;
+    geode->addDrawable(geometry);
+    return geode;
+}
 osg::ref_ptr<osg::Geometry> createColoredBox(osg::Vec3 center, osg::Vec3 scale)
 {
     // 创建顶点数组
