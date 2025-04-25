@@ -7,6 +7,7 @@
 #include <osg/LineWidth>
 #include <osg/StateSet>
 #include <osg/Material>
+#include <osg/PositionAttitudeTransform>
 
 #include "coreLib.h"
 #include "orbitLib.h"
@@ -19,16 +20,18 @@ using namespace osgEarth::Util;
 
 class SatelliteObj{
 public:
-    SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg::Geode> geode, time_t t0);
-    void setposition(time_t t);
-cSatellite* sat;
-osg::ref_ptr<osg::Geode> satgroup;
-MapNode* mapNode;
-osg::ref_ptr<osg::MatrixTransform> boxTransform;
-osg::ref_ptr<osg::Geometry> orbit;
-osg::ref_ptr<osg::Geometry> boxwing;
-LabelNode* label;
-
+    SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg::Geode> geode, time_t t0, osg::Vec3d sunPos);
+    void setposition(time_t t, osg::Vec3d sunPos);
+    void setatt(osg::ref_ptr<osg::Vec3Array> vertices, osg::Vec3d sunPos);
+    cSatellite* sat;
+    osg::ref_ptr<osg::Geode> satgroup;
+    MapNode* mapNode;
+    osg::ref_ptr<osg::Geometry> orbit;
+    osg::ref_ptr<osg::Node> box;
+    osg::ref_ptr<osg::MatrixTransform> wing;
+    LabelNode* label;
+    osg::ref_ptr<osg::PositionAttitudeTransform> pat;
+    double scale;
 };
 
 osg::ref_ptr<osg::Geometry> createColoredBox(osg::Vec3 center, osg::Vec3 scale);
