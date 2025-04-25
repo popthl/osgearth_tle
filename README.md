@@ -17,5 +17,6 @@ cmake .
 make
 bin/osgearth_tle tests/simple.earth --tle /osgearth_cache/tle.txt
 
-![image](https://github.com/user-attachments/assets/1567eab8-9062-45b2-997d-d3249bc549f2)
 
+
+realize the yaw-steering mode of the satellite according to the paper
