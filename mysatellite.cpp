@@ -1,68 +1,17 @@
 #include "mysatellite.h"
 #include <osgEarth/LabelNode>
+#include <osg/BlendFunc>
+
 osg::ref_ptr<osg::MatrixTransform> createRotatingSail(double angle);
 osg::ref_ptr<osg::Node> createColoredCube();
 
-SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg::Geode> geode,time_t t0,osg::Vec3d sunPos){
+SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg::Geode> geode,DateTime t0,osg::Vec3d sunPos){
     mapNode=mapnode;
     sat=sattle;
     satgroup=geode;
     //boxTransform = new osg::MatrixTransform;
     pat = new osg::PositionAttitudeTransform();
     scale = 0.5;
-
-    const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
-    double Tcycle = 2*PI/sat->Orbit().MeanMotion();
-    double dt = Tcycle/3*60;
-    //printf("Tcycle %f dt %f t0 %ld\n",Tcycle*60,dt,t0);
-    vector<osg::Vec3d> pt;
-    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
-    orbit = new osg::Geometry;
-    osg::Vec3d llh0,xyz;
-    for(int i=0;i<3;i++)
-    {
-        //printf("t %d %s",t0,ctime(&t0));
-        vector<double> llh = SatEcf(*sat,t0);
-        double dl = i*dt*OMEGA_E;//IAU_EARTH_ANGULAR_VELOCITY;
-        //cout<<llh[0]<<" "<<llh[1]<<" "<<llh[2]<<" "<<dl<<endl;
-	llh0 =osg::Vec3d(llh[0]+dl, llh[1], llh[2]*1000);
-	pt.push_back(llh0);
-	if(i>0){
-	    Vec3dVector out;
-	    TessellateOperator::tessellateGeo(pt[i-1],pt[i],20,GEOINTERP_GREAT_CIRCLE,out);
-	    for(int k=0;k<out.size();k++){
-		geoSRS->transformToWorld(out[k], xyz);
-		vertices->push_back(xyz);
-		//printf("%d : %lf %lf %lf\n",k,out[k].x(),out[k].y(),out[k].z());
-	    }
-	}
-        t0+=dt;
-    }
-    Vec3dVector out;
-    //printf("pt0: %lf %lf %lf\n",pt[0].x(),pt[0].y(),pt[0].z());
-    TessellateOperator::tessellateGeo(pt[2],pt[0],20,GEOINTERP_GREAT_CIRCLE,out);
-    for(int i=0;i<out.size();i++){
-	geoSRS->transformToWorld(out[i], xyz);
-	vertices->push_back(xyz);
-	//printf("%d : %lf %lf %lf\n",i,out[i].x(),out[i].y(),out[i].z());
-    }
-    orbit->setVertexArray(vertices);
-    osg::ref_ptr<osg::Vec4Array> colors = new osg::Vec4Array;
-    colors->push_back(osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f));
-    orbit->setColorArray(colors);
-    orbit->setColorBinding(osg::Geometry::BIND_OVERALL);
-
-    // 指定图元类型（这里是 LINE_LOOP）
-    orbit->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::LINE_LOOP, 0, vertices->size()));
-
-    // 设置渲染状态
-    osg::ref_ptr<osg::StateSet> stateSet = orbit->getOrCreateStateSet();
-    osg::ref_ptr<osg::LineWidth> lineWidth = new osg::LineWidth;
-    lineWidth->setWidth(2.0f);
-    stateSet->setAttributeAndModes(lineWidth, osg::StateAttribute::ON);
-
-    //boxwing = createColoredBox(osg::Vec3(0,0,0),osg::Vec3(RADIUS,RADIUS*1,RADIUS*2));
-    //wingangle = 1.0;
     box = createColoredCube();
     wing = createRotatingSail(1.0);
 
@@ -70,14 +19,96 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     labelStyle.getOrCreate<TextSymbol>()->alignment() = TextSymbol::ALIGN_CENTER_CENTER;
     labelStyle.getOrCreate<TextSymbol>()->fill()->color() = Color::Yellow;
     label = new LabelNode(sat->Name(), labelStyle);
-    //label->setPosition();
-    label->setPosition(GeoPoint(geoSRS, pt[0].x(), pt[0].y(),pt[0].z()));
+
+    orbit = new osg::Geometry;
+    osg::ref_ptr<osg::Vec4Array> colors = new osg::Vec4Array;
+    colors->push_back(osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f));
+    orbit->setColorArray(colors);
+    orbit->setColorBinding(osg::Geometry::BIND_OVERALL);
+    osg::ref_ptr<osg::StateSet> stateSet = orbit->getOrCreateStateSet();
+    osg::ref_ptr<osg::LineWidth> lineWidth = new osg::LineWidth;
+    lineWidth->setWidth(2.0f);
+    stateSet->setAttributeAndModes(lineWidth, osg::StateAttribute::ON);
+    setposition(t0,sunPos);
 
     geode->addDrawable(orbit);
     mapNode->addChild(label);
-   setatt(vertices,sunPos);
-   pat->addChild(box);
-   pat->addChild(wing);
+    pat->addChild(box);
+    pat->addChild(wing);
+}
+int SatelliteObj::setposition(DateTime t0,osg::Vec3d sunPos){
+    const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
+    double Tcycle = 2*PI/sat->Orbit().MeanMotion()/60;
+    //printf("Tcycle %f\n",Tcycle*3600);
+    //cout<<"t0: "<<t0.asCompactISO8601()<<endl;
+    int npoint = 3;
+    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
+    osg::Vec3d llh0,xyz;
+    DateTime t=t0;
+    cJulian cjt0(t0.asTimeStamp());
+    double ra = sat->Orbit().Apogee();
+    double rp = sat->Orbit().Perigee();
+
+    if(sat->Orbit().Eccentricity()>0.02){
+	npoint=40;
+	while(t<t0+Tcycle){
+	    cJulian cjt(t.asTimeStamp());
+	    cEciTime sateci = sat->PositionEci(cjt);
+	    cEci pos = sateci;
+	    cGeo satgeo(pos, cjt0);
+	    //printf("llh: %lf %lf %lf\n",satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm());
+	    double s = 1+5*(ra-satgeo.AltitudeKm())/(ra-rp);
+	    //printf("s %f\n",s);
+	    t=t+Tcycle/npoint/s;
+	    llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
+            geoSRS->transformToWorld(llh0, xyz);
+            vertices->push_back(xyz);
+	}
+    }
+    else{
+	npoint=3;
+
+	double dt = Tcycle/npoint;
+        //printf("Tcycle %f dt %f \n",Tcycle*60,dt);
+	vector<osg::Vec3d> pt;
+
+    	for(int i=0;i<npoint;i++)
+    	{
+	    t=t0+i*dt;
+	    //cout<<t.asCompactISO8601()<<endl;
+	    cJulian cjt(t.asTimeStamp());
+	    cEciTime sateci = sat->PositionEci(cjt);
+	    cEci pos = sateci;
+	    cGeo satgeo(pos, cjt0);
+            //printf("llh: %lf %lf %lf\n",satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm());
+	    llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
+	    pt.push_back(llh0);
+	    if(i>0){
+		Vec3dVector out;
+		TessellateOperator::tessellateGeo(pt[i-1],pt[i],20,GEOINTERP_GREAT_CIRCLE,out);
+		for(int k=0;k<out.size();k++){
+		    geoSRS->transformToWorld(out[k], xyz);
+		    vertices->push_back(xyz);
+		    //printf("%d : %lf %lf %lf\n",k,out[k].x(),out[k].y(),out[k].z());
+		}
+	    }
+	}
+	Vec3dVector out;
+	TessellateOperator::tessellateGeo(pt[npoint-1],pt[0],20,GEOINTERP_GREAT_CIRCLE,out);
+	for(int i=0;i<out.size();i++){
+	    geoSRS->transformToWorld(out[i], xyz);
+	    vertices->push_back(xyz);
+	    //printf("%d : %lf %lf %lf\n",i,out[i].x(),out[i].y(),out[i].z());
+	}
+    }
+    //printf("vertices %d\n",vertices->size());
+    orbit->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::LINE_LOOP, 0, vertices->size()));
+    orbit->setVertexArray(vertices);
+    GeoPoint pos0;
+    pos0.fromWorld(geoSRS,(*vertices)[0]);
+    label->setPosition(pos0);
+    setatt(vertices,sunPos);
+    return vertices->size();
 }
 void SatelliteObj::setatt(osg::ref_ptr<osg::Vec3Array> vertices,osg::Vec3d sunPos)
 {
@@ -126,123 +157,6 @@ void SatelliteObj::setatt(osg::ref_ptr<osg::Vec3Array> vertices,osg::Vec3d sunPo
 //printf("beta %f, yaw %f, sinu %f, anglewing %f\n",beta*180/PI,yaw*180/PI,sinu,anglewing*180/PI);
    wing->setMatrix(osg::Matrix::rotate(anglewing, 0, 1, 0));
 }
-void SatelliteObj::setposition(time_t t0,osg::Vec3d sunPos){
-    //osg::Vec3 lastpos =(* dynamic_cast<osg::Vec3Array*>(orbit->getVertexArray()) )[0];
-    const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
-    double Tcycle = 2*PI/sat->Orbit().MeanMotion();
-    double dt = Tcycle/3*60;
-    //printf("Tcycle %f dt %f t0 %ld\n",Tcycle*60,dt,t0);
-    vector<osg::Vec3d> pt;
-    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
-    osg::Vec3d llh0,xyz;
-    for(int i=0;i<3;i++)
-    {
-        //printf("t %d %s",t0,ctime(&t0));
-        vector<double> llh = SatEcf(*sat,t0);
-        double dl = i*dt*OMEGA_E;//IAU_EARTH_ANGULAR_VELOCITY;
-        //cout<<llh[0]<<" "<<llh[1]<<" "<<llh[2]<<" "<<dl<<endl;
-	llh0 =osg::Vec3d(llh[0]+dl, llh[1], llh[2]*1000);
-	pt.push_back(llh0);
-	if(i>0){
-	    Vec3dVector out;
-	    TessellateOperator::tessellateGeo(pt[i-1],pt[i],20,GEOINTERP_GREAT_CIRCLE,out);
-	    for(int k=0;k<out.size();k++){
-		geoSRS->transformToWorld(out[k], xyz);
-		vertices->push_back(xyz);
-		//printf("%d : %lf %lf %lf\n",k,out[k].x(),out[k].y(),out[k].z());
-	    }
-	}
-        t0+=dt;
-    }
-    Vec3dVector out;
-    //printf("pt0: %lf %lf %lf\n",pt[0].x(),pt[0].y(),pt[0].z());
-    TessellateOperator::tessellateGeo(pt[2],pt[0],20,GEOINTERP_GREAT_CIRCLE,out);
-    for(int i=0;i<out.size();i++){
-	geoSRS->transformToWorld(out[i], xyz);
-	vertices->push_back(xyz);
-	//printf("%d : %lf %lf %lf\n",i,out[i].x(),out[i].y(),out[i].z());
-    }
-    orbit->setVertexArray(vertices);
-    label->setPosition(GeoPoint(geoSRS, pt[0].x(), pt[0].y(),pt[0].z()));
-    //osg::Matrix translationMatrix = osg::Matrix::translate((*vertices)[0]);
-    //boxTransform->setMatrix(translationMatrix);
-    setatt(vertices,sunPos);
-}
-/*osg::ref_ptr<osg::Geode> createsatellite(cSatellite* sat,MapNode* mapNode,time_t t0){
-    const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
-    osg::ref_ptr<osg::Geode> geode = new osg::Geode();
-    double Tcycle = 2*PI/sat->Orbit().MeanMotion();
-    double dt = Tcycle/3*60;
-    //printf("Tcycle %f dt %f t0 %ld\n",Tcycle*60,dt,t0);
-    vector<osg::Vec3d> pt;
-    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
-    osg::ref_ptr<osg::Geometry> orbit = new osg::Geometry;
-    osg::Vec3d llh0,xyz;
-    for(int i=0;i<3;i++)
-    {
-        //printf("t %d %s",t0,ctime(&t0));
-        vector<double> llh = SatEcf(*sat,t0);
-        double dl = i*dt*OMEGA_E;//IAU_EARTH_ANGULAR_VELOCITY;
-        //cout<<llh[0]<<" "<<llh[1]<<" "<<llh[2]<<" "<<dl<<endl;
-	llh0 =osg::Vec3d(llh[0]+dl, llh[1], llh[2]*1000);
-	pt.push_back(llh0);
-	if(i>0){
-	    Vec3dVector out;
-	    TessellateOperator::tessellateGeo(pt[i-1],pt[i],20,GEOINTERP_GREAT_CIRCLE,out);
-	    for(int k=0;k<out.size();k++){
-		geoSRS->transformToWorld(out[k], xyz);
-		vertices->push_back(xyz);
-		//printf("%d : %lf %lf %lf\n",k,out[k].x(),out[k].y(),out[k].z());
-	    }
-	}
-        t0+=dt;
-    }
-    Vec3dVector out;
-    //printf("pt0: %lf %lf %lf\n",pt[0].x(),pt[0].y(),pt[0].z());
-    TessellateOperator::tessellateGeo(pt[2],pt[0],20,GEOINTERP_GREAT_CIRCLE,out);
-    for(int i=0;i<out.size();i++){
-	geoSRS->transformToWorld(out[i], xyz);
-	vertices->push_back(xyz);
-	//printf("%d : %lf %lf %lf\n",i,out[i].x(),out[i].y(),out[i].z());
-    }
-    osg::ref_ptr<osg::Geometry> coloredBox = createColoredBox((*vertices)[0],osg::Vec3(RADIUS,RADIUS*1,RADIUS*2));
-    geode->addDrawable(coloredBox);
-    //mapNode->addChild(coloredBox);
-    // Style our labels:
-    Style labelStyle;
-    labelStyle.getOrCreate<TextSymbol>()->alignment() = TextSymbol::ALIGN_CENTER_CENTER;
-    labelStyle.getOrCreate<TextSymbol>()->fill()->color() = Color::Yellow;
-    LabelNode* label = new LabelNode(sat->Name(), labelStyle);
-    //label->setPosition();
-    label->setPosition(GeoPoint(geoSRS, pt[0].x(), pt[0].y(),pt[0].z()));
-    mapNode->addChild(label);
-
-
-    /*osg::ref_ptr<osgText::Text> text = new osgText::Text;
-    text->setCharacterSize(20000.0);
-    text->setPosition(xyz);
-    text->setText(sat->Name());
-    mapNode->addChild(text);*
-
-    orbit->setVertexArray(vertices);
-    osg::ref_ptr<osg::Vec4Array> colors = new osg::Vec4Array;
-    colors->push_back(osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f));
-    orbit->setColorArray(colors);
-    orbit->setColorBinding(osg::Geometry::BIND_OVERALL);
-
-    // 指定图元类型（这里是 LINE_LOOP）
-    orbit->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::LINE_LOOP, 0, vertices->size()));
-
-    // 设置渲染状态
-    osg::ref_ptr<osg::StateSet> stateSet = orbit->getOrCreateStateSet();
-    osg::ref_ptr<osg::LineWidth> lineWidth = new osg::LineWidth;
-    lineWidth->setWidth(2.0f);
-    stateSet->setAttributeAndModes(lineWidth, osg::StateAttribute::ON);
-    geode->addDrawable(orbit);
-
-    return geode;
-
-}*/
 void readtlefile(string tlefile, vector<cSatellite*>* satlist){
         std::ifstream fin(tlefile.c_str());
         std::string linename, line1, line2;
@@ -391,6 +305,82 @@ osg::ref_ptr<osg::Node> createColoredCube() {
     geode->addDrawable(geometry);
     return geode;
 }
+/*osg::ref_ptr<osg::Geode> createsatellite(cSatellite* sat,MapNode* mapNode,time_t t0){
+    const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
+    osg::ref_ptr<osg::Geode> geode = new osg::Geode();
+    double Tcycle = 2*PI/sat->Orbit().MeanMotion();
+    double dt = Tcycle/3*60;
+    //printf("Tcycle %f dt %f t0 %ld\n",Tcycle*60,dt,t0);
+    vector<osg::Vec3d> pt;
+    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
+    osg::ref_ptr<osg::Geometry> orbit = new osg::Geometry;
+    osg::Vec3d llh0,xyz;
+    for(int i=0;i<3;i++)
+    {
+        //printf("t %d %s",t0,ctime(&t0));
+        vector<double> llh = SatEcf(*sat,t0);
+        double dl = i*dt*OMEGA_E;//IAU_EARTH_ANGULAR_VELOCITY;
+        //cout<<llh[0]<<" "<<llh[1]<<" "<<llh[2]<<" "<<dl<<endl;
+	llh0 =osg::Vec3d(llh[0]+dl, llh[1], llh[2]*1000);
+	pt.push_back(llh0);
+	if(i>0){
+	    Vec3dVector out;
+	    TessellateOperator::tessellateGeo(pt[i-1],pt[i],20,GEOINTERP_GREAT_CIRCLE,out);
+	    for(int k=0;k<out.size();k++){
+		geoSRS->transformToWorld(out[k], xyz);
+		vertices->push_back(xyz);
+		//printf("%d : %lf %lf %lf\n",k,out[k].x(),out[k].y(),out[k].z());
+	    }
+	}
+        t0+=dt;
+    }
+    Vec3dVector out;
+    //printf("pt0: %lf %lf %lf\n",pt[0].x(),pt[0].y(),pt[0].z());
+    TessellateOperator::tessellateGeo(pt[2],pt[0],20,GEOINTERP_GREAT_CIRCLE,out);
+    for(int i=0;i<out.size();i++){
+	geoSRS->transformToWorld(out[i], xyz);
+	vertices->push_back(xyz);
+	//printf("%d : %lf %lf %lf\n",i,out[i].x(),out[i].y(),out[i].z());
+    }
+    osg::ref_ptr<osg::Geometry> coloredBox = createColoredBox((*vertices)[0],osg::Vec3(RADIUS,RADIUS*1,RADIUS*2));
+    geode->addDrawable(coloredBox);
+    //mapNode->addChild(coloredBox);
+    // Style our labels:
+    Style labelStyle;
+    labelStyle.getOrCreate<TextSymbol>()->alignment() = TextSymbol::ALIGN_CENTER_CENTER;
+    labelStyle.getOrCreate<TextSymbol>()->fill()->color() = Color::Yellow;
+    LabelNode* label = new LabelNode(sat->Name(), labelStyle);
+    //label->setPosition();
+    label->setPosition(GeoPoint(geoSRS, pt[0].x(), pt[0].y(),pt[0].z()));
+    mapNode->addChild(label);
+
+
+    /*osg::ref_ptr<osgText::Text> text = new osgText::Text;
+    text->setCharacterSize(20000.0);
+    text->setPosition(xyz);
+    text->setText(sat->Name());
+    mapNode->addChild(text);*
+
+    orbit->setVertexArray(vertices);
+    osg::ref_ptr<osg::Vec4Array> colors = new osg::Vec4Array;
+    colors->push_back(osg::Vec4(1.0f, 0.0f, 0.0f, 1.0f));
+    orbit->setColorArray(colors);
+    orbit->setColorBinding(osg::Geometry::BIND_OVERALL);
+
+    // 指定图元类型（这里是 LINE_LOOP）
+    orbit->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::LINE_LOOP, 0, vertices->size()));
+
+    // 设置渲染状态
+    osg::ref_ptr<osg::StateSet> stateSet = orbit->getOrCreateStateSet();
+    osg::ref_ptr<osg::LineWidth> lineWidth = new osg::LineWidth;
+    lineWidth->setWidth(2.0f);
+    stateSet->setAttributeAndModes(lineWidth, osg::StateAttribute::ON);
+    geode->addDrawable(orbit);
+
+    return geode;
+
+}*/
+/*
 osg::ref_ptr<osg::Geometry> createColoredBox(osg::Vec3 center, osg::Vec3 scale)
 {
     // 创建顶点数组
@@ -515,3 +505,44 @@ vector<double> SatEcf(const cSatellite& sat, time_t t)
     llh.push_back(satgeo.AltitudeKm());
     return llh;
 }
+osg::Vec3d SatEci(const cSatellite& sat, time_t t)
+{
+    cJulian cjt(t);
+    cEciTime sateci = sat.PositionEci(cjt);
+    cEci pos = sateci;
+    osg::Vec3d xyz(pos.Position().m_x,pos.Position().m_y,pos.Position().m_z);
+    return xyz;
+}
+// Reference time for the J2000 ECI coordinate frame
+static DateTime J2000Epoch(2000, 1, 1, 12.00);
+
+// Transform that takes us from a J2000 ECI reference frame
+// to an ECEF reference frame (i.e. MapNode)
+class J2000ToECEFTransform : public osg::MatrixTransform
+{
+public:
+    void setDateTime(const DateTime& dt)
+    {
+        osg::Matrix matrix = createMatrix(dt);
+        setMatrix(matrix);
+    }
+
+    static osg::Matrix createMatrix(const DateTime& dt)
+    {
+        // Earth's rotation rate: International Astronomical Union (IAU) GRS 67
+        const double IAU_EARTH_ANGULAR_VELOCITY = 7292115.1467e-11; // (rad/sec)
+
+        double secondsElapsed = (double)(dt.asTimeStamp() - J2000Epoch.asTimeStamp());
+        const double rotation = IAU_EARTH_ANGULAR_VELOCITY * secondsElapsed;
+
+        osg::Matrix matrix;
+        matrix.makeRotate(rotation, 0, 0, 1);
+        return matrix;
+    }
+};
+//    osg::Matrix eci2ecef = J2000ToECEFTransform::createMatrix(t0);
+//        osg::Vec3d eci = SatEci(*sat,t.asTimeStamp());
+//        printf("eci: %lf %lf %lf\n",eci.x(),eci.y(),eci.z());
+//	osg::Vec3d ecef =eci2ecef*eci;
+//        printf("ecef: %lf %lf %lf\n",ecef.x(),ecef.y(),ecef.z());
+*/
