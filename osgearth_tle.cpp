@@ -1,3 +1,5 @@
+#include <osgEarth/MouseCoordsTool>
+#include <osgEarth/LatLongFormatter>
 #include <osgViewer/Viewer>
 #include <osgEarth/MapNode>
 #include <osgEarth/EarthManipulator>
@@ -17,6 +19,8 @@
 #include <osg/Light>
 #include <osg/LightSource>
 #include <osgViewer/Viewer>
+#include <osg/BlendFunc>
+
 #include "mysatellite.h"
 #include "coreLib.h"
 #include "orbitLib.h"
@@ -24,6 +28,7 @@
 
 using namespace osgEarth;
 using namespace osgEarth::Util;
+using namespace osgEarth::Contrib;
 namespace ui = osgEarth::Util::Controls;
 
         const double IAU_EARTH_ANGULAR_VELOCITY = 7292115.1467e-11; // (rad/sec)
@@ -33,19 +38,35 @@ struct App
     App() {
         _playing = false;
         _eci = false;
+        _show._cone = false;
+        _show._cov = false;
+        _show._orbit = true;
+	_show._label = true;
+	_show._scale = 1;
+	_show._eleva = 10;
+	_show._beamelev = 60;
         _speed = 10;
-	_scale = 1;
         readout = new ui::LabelControl();
         readout->setVertAlign(ui::Control::ALIGN_CENTER);
     }
 
     osg::ref_ptr<PlaceNode> sunPos;
-    //osg::ref_ptr<PlaceNode> moonPos;
+    osg::ref_ptr<PlaceNode> targetPos;
     SkyNode* sky;
     ui::LabelControl* readout;
+    ui::LabelControl* lspeed;
+    ui::LabelControl* lscale;
+    ui::LabelControl* lelev;
+    ui::LabelControl* lbeamelev;
     ui::HSliderControl* speed;
     ui::HSliderControl* scale;
+    ui::HSliderControl* elev;
+    ui::HSliderControl* beamelev;
     ui::CheckBoxControl* eci;
+    ui::CheckBoxControl* cone;
+    ui::CheckBoxControl* cov;
+    ui::CheckBoxControl* orbit;
+    ui::CheckBoxControl* lab;
     void play() { _playing = true; }
     void stop() { _playing = false; }
 
@@ -56,17 +77,42 @@ struct App
         }
         readout->setText(sky->getDateTime().asRFC1123());
     }
-    void setSpeed(){_speed=speed->getValue();}
-    void setScale(){_scale=scale->getValue();}
+    void setSpeed(){_speed=speed->getValue();
+	std::stringstream ss;
+	ss<<std::right<<std::setw(4)<<_speed;
+	lspeed->setText("speed "+ss.str());}
+    void setScale(){_show._scale=scale->getValue();
+	std::stringstream ss;
+	ss<<std::right<<std::setw(4)<<std::fixed<<std::setprecision(1)<<_show._scale;
+	lscale->setText("scale "+ss.str());}
+    void setElev(){_show._eleva=elev->getValue();
+	std::stringstream ss;
+	ss<<std::right<<std::setw(4)<<std::fixed<<std::setprecision(1)<<_show._eleva;
+	lelev->setText("ele "+ss.str());}
+    void setBeamelev(){_show._beamelev=beamelev->getValue();
+	std::stringstream ss;
+	ss<<std::right<<std::setw(4)<<std::fixed<<std::setprecision(1)<<_show._beamelev;
+	lbeamelev->setText("bele "+ss.str());}
     void setECI(){_eci=eci->getValue();}
+    void setCone(){_show._cone=cone->getValue();}
+    void setCov(){_show._cov=cov->getValue();}
+    void setOrbit(){_show._orbit=orbit->getValue();}
+    void setLabel(){_show._label=lab->getValue();}
     bool _eci;
+    Showflags _show;
+
     bool _playing;
     int _speed;
-    double _scale;
 };
 OE_UI_HANDLER(setSpeed);
 OE_UI_HANDLER(setScale);
+OE_UI_HANDLER(setElev);
+OE_UI_HANDLER(setBeamelev);
 OE_UI_HANDLER(setECI);
+OE_UI_HANDLER(setCone);
+OE_UI_HANDLER(setCov);
+OE_UI_HANDLER(setOrbit);
+OE_UI_HANDLER(setLabel);
 
 struct Play : public ui::ControlEventHandler {
     Play(App& app) : _app(app) { }
@@ -82,21 +128,85 @@ struct Stop : public ui::ControlEventHandler {
 
 ui::Container* createUI(App& app)
 {
-    ui::HBox* vcr = new ui::HBox();
-    vcr->addControl(new ui::LabelControl("ECI"));
-    app.eci=vcr->addControl(new ui::CheckBoxControl(false,new setECI(app)));
-    vcr->addControl(new ui::ButtonControl("Play", new Play(app)));
-    vcr->addControl(new ui::ButtonControl("Stop", new Stop(app)));
-    vcr->addControl(new ui::LabelControl("speed:"));
-    app.speed=vcr->addControl(new ui::HSliderControl(1,100,10,new setSpeed(app)));
+    ui::Grid* grid = new ui::Grid();
+    grid->setControl(2,0,new ui::ButtonControl("Play", new Play(app)));
+    grid->setControl(3,0,new ui::ButtonControl("Stop", new Stop(app)));
+    app.lspeed=grid->setControl(4,0,new ui::LabelControl("speed"));
+    app.speed=grid->setControl(5,0,new ui::HSliderControl(-100,100,10,new setSpeed(app)));
     app.speed->setWidth(150);
-    vcr->addControl(new ui::LabelControl("model scale:"));
-    app.scale=vcr->addControl(new ui::HSliderControl(1,10,1,new setScale(app)));
+    grid->setControl(6,0,app.readout);
+    int col=0;
+    app.lscale=grid->setControl(0,col,new ui::LabelControl("model scale"));
+    app.scale=grid->setControl(1,col++,new ui::HSliderControl(0.1,5,1,new setScale(app)));
     app.scale->setWidth(100);
-    vcr->addControl(app.readout);
-    return vcr;
-}
+    app.lelev=grid->setControl(0,col,new ui::LabelControl("elev thrd"));
+    app.elev=grid->setControl(1,col++,new ui::HSliderControl(1,70,10,new setElev(app)));
+    app.elev->setWidth(100);
+    app.lbeamelev=grid->setControl(0,col,new ui::LabelControl("Beam elev"));
+    app.beamelev=grid->setControl(1,col++,new ui::HSliderControl(5,89,60,new setBeamelev(app)));
+    app.beamelev->setWidth(100);
+    grid->setControl(0,col,new ui::LabelControl("ECI"));
+    app.eci=grid->setControl(1,col++,new ui::CheckBoxControl(false,new setECI(app)));
+    grid->setControl(0,col,new ui::LabelControl("Beam Cone"));
+    app.cone=grid->setControl(1,col++,new ui::CheckBoxControl(false,new setCone(app)));
+    grid->setControl(0,col,new ui::LabelControl("Beam Cover"));
+    app.cov=grid->setControl(1,col++,new ui::CheckBoxControl(false,new setCov(app)));
+    grid->setControl(0,col,new ui::LabelControl("Orbit"));
+    app.orbit=grid->setControl(1,col++,new ui::CheckBoxControl(true,new setOrbit(app)));
+    grid->setControl(0,col,new ui::LabelControl("Label"));
+    app.lab=grid->setControl(1,col++,new ui::CheckBoxControl(true,new setLabel(app)));
 
+    return grid;
+}
+class CoordinateCollector : public MouseCoordsTool::Callback
+{
+public:
+    GeoPoint currentPoint;
+    
+    void set(const GeoPoint& coords, osg::View* view, MapNode* mapNode) override
+    {
+        currentPoint = coords;
+    }
+    
+    void reset(osg::View* view, MapNode* mapNode) override
+    {
+        currentPoint = GeoPoint(); // 设置为无效点
+    }
+};
+
+class ClickHandler : public osgGA::GUIEventHandler
+{
+public:
+    ClickHandler(CoordinateCollector* collector,    osg::ref_ptr<PlaceNode> targetPos)
+ : _collector(collector), _targetPos(targetPos) {}
+    bool handle(const osgGA::GUIEventAdapter& ea, osgGA::GUIActionAdapter& aa)
+    {
+        if (ea.getEventType() == osgGA::GUIEventAdapter::RELEASE && 
+            ea.getButton() == osgGA::GUIEventAdapter::RIGHT_MOUSE_BUTTON)
+        {
+            // 从 MouseCoordsTool 获取当前坐标
+            const GeoPoint& point = _collector->currentPoint;
+            
+            if (point.isValid())
+            {
+                // 打印WGS84坐标
+                std::cout << "点击位置坐标: " 
+                          << "Lat=" << point.y() << ", "
+                          << "Lon=" << point.x() << ", "
+                          << "Alt=" << point.z() << "m" << std::endl;
+                _targetPos->setPosition(point);
+                // 添加标签节点
+                //addLabel(point);
+            }
+            
+            return true;
+        }
+        return false;
+    }
+    CoordinateCollector* _collector;
+    osg::ref_ptr<PlaceNode> _targetPos;
+
+};
 int main(int argc, char** argv)
 {
     osgEarth::initialize();
@@ -149,7 +259,7 @@ int main(int argc, char** argv)
 	root->addChild(skyNode);
 	app.sky = skyNode;
         const Ephemeris* ephemeris = 0L;
-osg::ref_ptr<osg::Image> mark = osgDB::readRefImageFile("/osgearth/data/placemark32.png");
+	osg::ref_ptr<osg::Image> mark = osgDB::readRefImageFile("/osgearth/data/placemark32.png");
         if ( app.sky )
         {
             ephemeris = app.sky->getEphemeris();
@@ -159,11 +269,22 @@ osg::ref_ptr<osg::Image> mark = osgDB::readRefImageFile("/osgearth/data/placemar
 
         }
 
-
+	app.targetPos = new PlaceNode("Target",Style(),mark.get());
+        app.targetPos->setDynamic(true);
+	app.targetPos->setPosition(GeoPoint(geoSRS, 110, 30));
+        mapNode->addChild( app.targetPos.get() );
 
         ui::ControlCanvas* container = ui::ControlCanvas::getOrCreate(&viewer);
         container->addChild(createUI(app));
 
+	MouseCoordsTool* tool = new MouseCoordsTool(mapNode);
+	LatLongFormatter formatter;
+	//tool->addCallback(new MouseCoordsLabelCallback(app.target, &formatter));
+	viewer.addEventHandler(tool);
+	CoordinateCollector* collector = new CoordinateCollector();
+	tool->addCallback(collector);
+
+	viewer.addEventHandler(new ClickHandler(collector,app.targetPos));
     // A lat/long SRS for specifying points.
     //const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
     //std::map<int,osg::ref_ptr<osg::Geode> > satobj;
@@ -176,10 +297,12 @@ osg::ref_ptr<osg::Image> mark = osgDB::readRefImageFile("/osgearth/data/placemar
 	for(int i=0;i<satlist.size();i++)
     	{
     	    cSatellite* sat = satlist[i];
-	    if(sat->Name().find("BEIDOU-3 "/*"GPS BIII-6"*/)!=string::npos){
+	    if(sat->Name().find("BEIDOU-3"/*"GPS"*/)!=string::npos){
+	    //if(sat->Name().find("POLAR"/*"BEIDOU-3 M1""GPS BIII-6"*/)!=string::npos){
 	    //if(sat->Name().find("QZS"/*"GPS BIII-6"*/)!=string::npos){
+	    //if(sat->Name().find("GPS BIIF")!=string::npos){
 		printf("%s\n",sat->Name().c_str());
-		SatelliteObj * satobj = new SatelliteObj(sat,mapNode,geode,t.asTimeStamp(),sunPos);
+		SatelliteObj * satobj = new SatelliteObj(sat,mapNode,geode,t,sunPos,app.targetPos);
 		//root->addChild(satobj->boxTransform);
 		root->addChild(satobj->pat);
 		satobjmap[i]=satobj;
@@ -188,6 +311,8 @@ osg::ref_ptr<osg::Image> mark = osgDB::readRefImageFile("/osgearth/data/placemar
 	//GeodeFinder finder;
     //root->accept(finder);
 	root->addChild(geode);
+
+
 for (const auto& pair : satobjmap)
 {
   std::cout << "Key: " << pair.first << ", Value: " << pair.second->sat->Name() << std::endl;
@@ -208,8 +333,10 @@ for (const auto& pair : satobjmap)
 		sunPos = sun.geocentric;
 		sunPos.normalize();
 		for(const auto & pair : satobjmap){
-		    pair.second->scale = app._scale/2.0;
-		    pair.second->setposition(dt.asTimeStamp(),sunPos);
+		    //pair.second->scale = app._scale/2.0;
+		    pair.second->showflag = app._show;
+//printf("scale %f ele %f beamele %f\n",pair.second->showflag._scale,pair.second->showflag._eleva,pair.second->showflag._beamelev);
+		    pair.second->setposition(dt,sunPos);
 		}
 		if(app._eci){
 			//printf("dt %d\n",app._speed);
