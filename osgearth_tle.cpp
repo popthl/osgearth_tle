@@ -1,3 +1,4 @@
+//#include <osgEarthDrivers/sky_simple/SimpleSkyNode>
 #include <osgEarth/MouseCoordsTool>
 #include <osgEarth/LatLongFormatter>
 #include <osgViewer/Viewer>
@@ -158,6 +159,7 @@ ui::Container* createUI(App& app)
 
     return grid;
 }
+/*
 class CoordinateCollector : public MouseCoordsTool::Callback
 {
 public:
@@ -173,19 +175,32 @@ public:
         currentPoint = GeoPoint(); // 设置为无效点
     }
 };
-
+*/
 class ClickHandler : public osgGA::GUIEventHandler
 {
 public:
-    ClickHandler(CoordinateCollector* collector,    osg::ref_ptr<PlaceNode> targetPos)
- : _collector(collector), _targetPos(targetPos) {}
+//    ClickHandler(CoordinateCollector* collector,    osg::ref_ptr<PlaceNode> targetPos)
+// : _collector(collector), _targetPos(targetPos) {}
+    ClickHandler(MapNode* mapnode,    osg::ref_ptr<PlaceNode> targetPos)
+ : _mapNode(mapnode), _targetPos(targetPos) {}
     bool handle(const osgGA::GUIEventAdapter& ea, osgGA::GUIActionAdapter& aa)
     {
         if (ea.getEventType() == osgGA::GUIEventAdapter::RELEASE && 
             ea.getButton() == osgGA::GUIEventAdapter::RIGHT_MOUSE_BUTTON)
         {
+            osg::Vec3d world;
+            if ( _mapNode->getTerrain()->getWorldCoordsUnderMouse(aa.asView(), ea.getX(), ea.getY(), world) )
+            {
+                GeoPoint map;
+                map.fromWorld( _mapNode->getMapSRS(), world );
+                std::cout << "点击位置坐标: " 
+                          << "Lat=" << map.y() << ", "
+                          << "Lon=" << map.x() << ", "
+                          << "Alt=" << map.z() << "m" << std::endl;
+                _targetPos->setPosition(map);
+	    }
             // 从 MouseCoordsTool 获取当前坐标
-            const GeoPoint& point = _collector->currentPoint;
+            /*const GeoPoint& point = _collector->currentPoint;
             
             if (point.isValid())
             {
@@ -198,14 +213,14 @@ public:
                 // 添加标签节点
                 //addLabel(point);
             }
-            
+            */
             return true;
         }
         return false;
     }
-    CoordinateCollector* _collector;
+    //CoordinateCollector* _collector;
     osg::ref_ptr<PlaceNode> _targetPos;
-
+    MapNode*      _mapNode;
 };
 int main(int argc, char** argv)
 {
@@ -251,6 +266,9 @@ int main(int argc, char** argv)
     skyOptions.ambient() = 0.1;
 	//skyOptions.coordinateSystem() = osgEarth::Util::SkyOptions::COORDSYS_ECEF;
     skyOptions.quality()=osgEarth::Util::SkyOptions::Quality::QUALITY_DEFAULT;
+    
+    //osgEarth::SimpleSky::SimpleSkyOptions skyOptions;
+    //osgEarth::SimpleSky::SimpleSkyNode* skyNode = new osgEarth::SimpleSky::SimpleSkyNode(skyOptions);
     osgEarth::Util::SkyNode* skyNode = osgEarth::Util::SkyNode::create(skyOptions);
 
 /*        std::string ext = mapNode->getMapSRS()->isGeographic() ? "sky_simple" : "sky_gl";
@@ -277,14 +295,15 @@ int main(int argc, char** argv)
         ui::ControlCanvas* container = ui::ControlCanvas::getOrCreate(&viewer);
         container->addChild(createUI(app));
 
-	MouseCoordsTool* tool = new MouseCoordsTool(mapNode);
+	/*MouseCoordsTool* tool = new MouseCoordsTool(mapNode);
 	LatLongFormatter formatter;
 	//tool->addCallback(new MouseCoordsLabelCallback(app.target, &formatter));
 	viewer.addEventHandler(tool);
 	CoordinateCollector* collector = new CoordinateCollector();
 	tool->addCallback(collector);
 
-	viewer.addEventHandler(new ClickHandler(collector,app.targetPos));
+	viewer.addEventHandler(new ClickHandler(collector,app.targetPos));*/
+	viewer.addEventHandler(new ClickHandler(mapNode,app.targetPos));
     // A lat/long SRS for specifying points.
     //const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
     //std::map<int,osg::ref_ptr<osg::Geode> > satobj;
