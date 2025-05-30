@@ -34,6 +34,7 @@ public:
     SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg::Geode> geode, DateTime t0, osg::Vec3d sunPos,osg::ref_ptr<PlaceNode> targetPos);
     int setposition(DateTime t, osg::Vec3d sunPos);
     void setatt(osg::ref_ptr<osg::Vec3Array> vertices, osg::Vec3d sunPos);
+    void setvisible(bool vis);
     cSatellite* sat;
     osg::ref_ptr<osg::Geode> satgroup;
     osg::ref_ptr<PlaceNode> target;
@@ -45,10 +46,8 @@ public:
     osg::ref_ptr<osg::MatrixTransform> wing;
     LabelNode* label;
     osg::ref_ptr<osg::PositionAttitudeTransform> pat;
-    //double scale;
-    //double eleva;
-    //double beamelev;
     Showflags showflag;
+    bool _vis;
 };
 
 void readtlefile(string tlefile, vector<cSatellite*>* satlist);
