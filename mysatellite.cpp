@@ -13,6 +13,7 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     sat=sattle;
     satgroup=geode;
     target = targetPos;
+    _vis=true;
     //boxTransform = new osg::MatrixTransform;
     pat = new osg::PositionAttitudeTransform();
     showflag._scale = 0.5;
@@ -62,12 +63,32 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     showflag._label = true;
     setposition(t0,sunPos);
 
-printf("ori satgroup %d\n",satgroup->getNumDrawables());
+//printf("ori satgroup %d\n",satgroup->getNumDrawables());
     mapNode->addChild(label);
     pat->addChild(box);
     pat->addChild(wing);
 }
+void SatelliteObj::setvisible(bool vis){
+    _vis=vis;
+    if(_vis){
+	cov->setNodeMask(0xffffffff);
+	orbit->setNodeMask(0xffffffff);
+	box->setNodeMask(0xffffffff);
+	label->setNodeMask(0xffffffff);
+	wing->setNodeMask(0xffffffff);
+	featureNode->setNodeMask(0xffffffff);
+    }
+    else{
+	cov->setNodeMask(0);
+	orbit->setNodeMask(0);
+	box->setNodeMask(0);
+	label->setNodeMask(0);
+	wing->setNodeMask(0);
+	featureNode->setNodeMask(0);
+    }
+}
 int SatelliteObj::setposition(DateTime t0,osg::Vec3d sunPos){
+if(!_vis)return 0;
     const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
     double Tcycle = 2*PI/sat->Orbit().MeanMotion()/60;
 osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
