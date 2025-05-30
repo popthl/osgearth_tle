@@ -23,4 +23,4 @@ realize the yaw-steering mode of the satellite according to the paper
 
 add satellite list to group the constellations of GNSS and StarLink
 
-![satellite](https://github.com/user-attachments/assets/80a19c67-0e21-4f40-bc7b-be54d0f417e9)
+![Uploading starlink.png…]()
