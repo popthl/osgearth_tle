@@ -25,7 +25,7 @@
 #include "mysatellite.h"
 #include "coreLib.h"
 #include "orbitLib.h"
-
+#include <regex>
 
 using namespace osgEarth;
 using namespace osgEarth::Util;
@@ -33,6 +33,175 @@ using namespace osgEarth::Contrib;
 namespace ui = osgEarth::Util::Controls;
 
         const double IAU_EARTH_ANGULAR_VELOCITY = 7292115.1467e-11; // (rad/sec)
+
+// 前向声明
+class TreeNode;
+
+// 点击事件处理器
+class TreeNodeClickHandler : public ControlEventHandler {
+public:
+    TreeNodeClickHandler(TreeNode* node) : _node(node) {}
+    virtual void onClick(Control* control) override;
+
+private:
+    osg::observer_ptr<TreeNode> _node;
+};
+
+
+// 树节点类（必须继承自容器控件）
+class TreeNode : public Grid { // Grid 是容器控件，支持 addControl()
+public:
+    TreeNode(const std::string& name, int level= -1, SatelliteObj * satobj = nullptr, bool expanded = false, TreeNode* parent = nullptr);
+
+    void addChild(TreeNode* child);
+    void updateparent(TreeNode* parent);
+    void toggle();
+
+    bool isChecked() const { return _checkbox->getValue(); }
+    void setChecked(bool checked) { _checkbox->setValue(checked); }
+    void setsatidx(int idx){_satidx=idx;}
+    int getsatidx(){return _satidx;}
+    SatelliteObj* getsatobj(){return _satobj;}
+    bool getexpanded(){return _expanded;}
+    // 设置展开状态
+    void setExpanded(bool expanded) {
+        _expanded = expanded;
+        _toggle->setText(expanded ? "-" : "+");
+        _children->setVisible(expanded);
+    }
+    // 设置节点名称
+    void setName(const std::string& name) {
+        if (_label.valid()) _label->setText(name);
+    }
+
+    // 获取节点名称
+    std::string getName() const {
+        return _label.valid() ? _label->text() : "";
+    }
+    VBox* getChildren(){return _children;}
+    TreeNode* getparent(){return _parent;}
+private:
+    std::string _name;
+    bool _expanded;
+    osg::ref_ptr<ButtonControl> _toggle;
+    osg::ref_ptr<LabelControl> _label;
+    osg::ref_ptr<VBox> _children;
+    TreeNode* _parent;
+    CheckBoxControl* _checkbox;
+    int _childnum;
+    int _satidx;
+    SatelliteObj * _satobj;
+    /*ButtonControl* _toggle;
+    LabelControl* _label;
+    VBox* _children;*/ // 子容器必须是 VBox/HBox/Grid 等容器类型
+};
+
+//--------------------------------------------------
+// 实现部分
+//--------------------------------------------------
+void TreeNodeClickHandler::onClick(Control* control) {
+//std::cout<<_node->getName()<<"onClick"<<std::endl;
+    if (_node.valid()) {
+        _node->toggle();
+    }
+}
+// 自定义复选框事件处理器
+class CheckboxHandler : public ControlEventHandler {
+public:
+    CheckboxHandler(TreeNode* node) : _node(node) {}
+
+    virtual void onValueChanged(Control* control, bool value) override {
+        if (_node.valid()) {
+            // 示例：打印节点选中状态
+            TreeNode* parent = _node->getparent();
+            /*if(parent!=nullptr){
+                OE_NOTICE<<"parent"<<parent->getName();
+            }
+            OE_NOTICE << "Node [" << _node->getName() 
+                      << "] checked: " << (value ? "true" : "false") 
+                      <<_node->getsatidx()<< std::endl;*/
+            if(_node->getsatidx()>=0){
+                //OE_NOTICE<<"sat "<<_node->getsatidx()<< std::endl;
+		_node->getsatobj()->setvisible(value);
+            }else{
+            VBox* children = _node->getChildren();
+            if(children->getNumChildren()>1){
+            	//OE_NOTICE << "children num"<<children->getNumChildren()<<std::endl;
+            	for(int i=0;i<children->getNumChildren();i++){
+            	    TreeNode* child = dynamic_cast<TreeNode*>(children->getChild(i));
+            	    if(child!=nullptr){
+            	    	//OE_NOTICE<<"child node "<<child->getName()<<child->getsatidx()<<std::endl;
+            	    	child->setChecked(value);
+            	    }
+            	}
+            }
+            }
+        }
+    }
+
+private:
+    osg::observer_ptr<TreeNode> _node;
+};
+TreeNode::TreeNode(const std::string& name, int level, SatelliteObj * satobj, bool expanded, TreeNode* parent)
+    : _name(name), _satidx(level), _satobj(satobj),  _expanded(expanded), _parent(parent)
+{
+    _expanded = true;
+    // 创建展开按钮
+    //_toggle = new ButtonControl(_expanded ? "-" : "+");
+    _toggle = new ButtonControl("o");
+    _toggle->setPadding(5);
+    _toggle->addEventHandler(new TreeNodeClickHandler(this));
+
+    // 创建标签
+    _label = new LabelControl(_name);
+    _label->setPadding(5);
+
+    // 配置网格布局（2列：按钮+标签）
+    setPadding(2);
+    setChildSpacing(5);
+    _checkbox = new CheckBoxControl();
+    _checkbox->addEventHandler(new CheckboxHandler(this)); // ✅ 绑定处理器
+    HBox* hb = new HBox();
+    hb->addControl(_checkbox);
+    hb->addControl(_label.get());
+    setControl(1,0,hb);
+    setControl(0,0,_toggle.get());  // ✅ Grid 是容器，支持 addControl()
+
+    // 创建子节点容器（必须是容器类型）
+    _children = new VBox();
+    _children->setVisible(_expanded);
+    setControl(1,1,_children.get()); // ✅ 正确添加到 Grid 容器
+    _childnum = 0;
+}
+
+void TreeNode::updateparent(TreeNode* parent) {
+    if(parent->getparent()!=nullptr){
+	updateparent(parent->getparent());
+    }
+    parent->_childnum++;
+    parent->setName(parent->_name+"("+std::to_string(parent->_childnum)+")");
+   
+}
+void TreeNode::addChild(TreeNode* child) {
+    child->_parent = this;
+    if(child->getsatidx()>=0){
+	_childnum++;
+	if(_parent!=nullptr){
+	    updateparent(_parent);
+	}
+    }
+    setName(_name+"("+std::to_string(_childnum)+")");
+    _children->addControl(child); // ✅ VBox 是容器，支持 addControl()
+    _toggle->setText(_expanded ? "-" : "+");
+}
+
+void TreeNode::toggle() {
+    if(_children->getNumChildren()>1){
+    	_expanded = !_expanded;
+    	_toggle->setText(_expanded ? "-" : "+");
+    	_children->setVisible(_expanded);
+    }
+}
 
 struct App
 {
@@ -49,6 +218,10 @@ struct App
         _speed = 10;
         readout = new ui::LabelControl();
         readout->setVertAlign(ui::Control::ALIGN_CENTER);
+        setpannel = new ui::VBox();
+        satlistpannel = new ui::VBox();
+        _visset=true;
+        _vissatlist=true;
     }
 
     osg::ref_ptr<PlaceNode> sunPos;
@@ -68,6 +241,8 @@ struct App
     ui::CheckBoxControl* cov;
     ui::CheckBoxControl* orbit;
     ui::CheckBoxControl* lab;
+    ui::VBox* setpannel;
+    ui::VBox* satlistpannel;
     void play() { _playing = true; }
     void stop() { _playing = false; }
 
@@ -94,6 +269,8 @@ struct App
 	std::stringstream ss;
 	ss<<std::right<<std::setw(4)<<std::fixed<<std::setprecision(1)<<_show._beamelev;
 	lbeamelev->setText("bele "+ss.str());}
+    void toggelset(){_visset=!_visset;setpannel->setVisible(_visset);}
+    void toggelsatlist(){_vissatlist=!_vissatlist;satlistpannel->setVisible(_vissatlist);}
     void setECI(){_eci=eci->getValue();}
     void setCone(){_show._cone=cone->getValue();}
     void setCov(){_show._cov=cov->getValue();}
@@ -104,6 +281,8 @@ struct App
 
     bool _playing;
     int _speed;
+    bool _visset;
+    bool _vissatlist;
 };
 OE_UI_HANDLER(setSpeed);
 OE_UI_HANDLER(setScale);
@@ -114,6 +293,8 @@ OE_UI_HANDLER(setCone);
 OE_UI_HANDLER(setCov);
 OE_UI_HANDLER(setOrbit);
 OE_UI_HANDLER(setLabel);
+OE_UI_HANDLER(toggelset);
+OE_UI_HANDLER(toggelsatlist);
 
 struct Play : public ui::ControlEventHandler {
     Play(App& app) : _app(app) { }
@@ -129,13 +310,26 @@ struct Stop : public ui::ControlEventHandler {
 
 ui::Container* createUI(App& app)
 {
-    ui::Grid* grid = new ui::Grid();
-    grid->setControl(2,0,new ui::ButtonControl("Play", new Play(app)));
-    grid->setControl(3,0,new ui::ButtonControl("Stop", new Stop(app)));
-    app.lspeed=grid->setControl(4,0,new ui::LabelControl("speed"));
-    app.speed=grid->setControl(5,0,new ui::HSliderControl(-100,100,10,new setSpeed(app)));
+    ui::VBox* vbox = new ui::VBox();
+    ui::HBox* hbox = new ui::HBox();
+    hbox->addControl(new ui::ButtonControl("Set",new toggelset(app)));
+    hbox->addControl(new ui::ButtonControl("SatLst",new toggelsatlist(app)));
+    hbox->addControl(new ui::ButtonControl("Play", new Play(app)));
+    hbox->addControl(new ui::ButtonControl("Stop", new Stop(app)));
+    ui::HBox* hbox1 = new ui::HBox();
+    app.lspeed=hbox1->addControl(new ui::LabelControl("speed"));
+    app.speed=hbox1->addControl(new ui::HSliderControl(-100,100,10,new setSpeed(app)));
     app.speed->setWidth(150);
-    grid->setControl(6,0,app.readout);
+    hbox1->addControl(app.readout);
+    vbox->addControl(hbox1);
+    vbox->addControl(hbox);
+    ui::Grid* grid = new ui::Grid();
+    //grid->setControl(2,0,new ui::ButtonControl("Play", new Play(app)));
+    //grid->setControl(3,0,new ui::ButtonControl("Stop", new Stop(app)));
+    //app.lspeed=grid->setControl(4,0,new ui::LabelControl("speed"));
+    //app.speed=grid->setControl(5,0,new ui::HSliderControl(-100,100,10,new setSpeed(app)));
+    //app.speed->setWidth(150);
+    //grid->setControl(6,0,app.readout);
     int col=0;
     app.lscale=grid->setControl(0,col,new ui::LabelControl("model scale"));
     app.scale=grid->setControl(1,col++,new ui::HSliderControl(0.1,5,1,new setScale(app)));
@@ -156,8 +350,11 @@ ui::Container* createUI(App& app)
     app.orbit=grid->setControl(1,col++,new ui::CheckBoxControl(true,new setOrbit(app)));
     grid->setControl(0,col,new ui::LabelControl("Label"));
     app.lab=grid->setControl(1,col++,new ui::CheckBoxControl(true,new setLabel(app)));
-
-    return grid;
+    
+    app.setpannel->addControl(grid);
+    vbox->addControl(app.setpannel);
+    //vbox->addControl(app.satlistpannel);
+    return vbox;
 }
 /*
 class CoordinateCollector : public MouseCoordsTool::Callback
@@ -222,6 +419,112 @@ public:
     osg::ref_ptr<PlaceNode> _targetPos;
     MapNode*      _mapNode;
 };
+int extractLastNumber(const std::string& str) {
+    int end = str.length() - 1;
+    
+    // 从末尾向前找到第一个非数字字符的位置
+    while (end >= 0 && std::isdigit(str[end])) {
+        end--;
+    }
+    
+    // 如果没有数字，返回0或抛出异常
+    if (end == str.length() - 1) {
+        return 0;  // 或 throw std::invalid_argument("No digits found");
+    }
+    
+    // 提取数字子串并转换为整数
+    std::string numStr = str.substr(end + 1);
+    return std::stoi(numStr);
+}
+void addleo(cSatellite* sat,map<string,TreeNode*>& stellnode, map<string,double>& satraan,SatelliteObj* satobj,int i,
+	string stell,string orbmode,string satcode,string stype,double esp=0.5,map<string,double>* satincl=nullptr){
+    	    	        std::cout<<sat->Name()<<" inc "<<sat->Orbit().Inclination()*180/PI<<" raan "<<sat->Orbit().RAAN()<<" raan size "<<satraan.size()<<" incl size "<<(*satincl).size();
+	double incl = sat->Orbit().Inclination();
+	bool newincl = true;
+	int kincl = 0;
+	int kinclmax=kincl;
+	if(satincl!=nullptr){
+	   for(const auto &kv: *satincl){
+		if(kv.first.find(stell+"I")!=std::string::npos){
+		    kincl=extractLastNumber(kv.first);//stoi(kv.first.substr(stell.length()+1,4));
+		    if(fabs(incl-kv.second)<0.1){
+				    std::cout<<" hit incline "<<kv.first<<" "<<kincl<<" "<<kv.second;
+			newincl=false;
+			break;
+		    }
+		    kincl++;
+		    kinclmax=kinclmax>kincl?kinclmax:kincl;
+		}
+	   }
+	   if(newincl){
+				    std::cout<<" new "<<kinclmax<<"  incline "<<incl<<" I"<<to_string(kinclmax);
+		(*satincl)[stell+"I"+to_string(kinclmax)]=incl;
+		stellnode[stell+"I"+to_string(kinclmax)]=new TreeNode("LEOI"+to_string(kinclmax)+"_"+to_string((int)(incl*180/PI)));
+		stellnode[stell]->addChild(stellnode[stell+"I"+to_string(kinclmax)]);
+	    }
+	}
+	std::cout<<"k "<<kincl<<" kinclmax "<<kinclmax<<std::endl;
+    	    	        double raan = sat->Orbit().RAAN();
+    	            	bool newraan=true;
+    	            	int k=0;
+			int kmax=k;
+			int ki=0;
+			for(const auto & kv: satraan){
+				std::cout<< kv.first<<" -> "<<kv.second<<"  "<<kv.first.substr(stell.length()+1,4)<<std::endl;
+				if(kv.first.find(stell+"I")!=std::string::npos){
+				    k=extractLastNumber(kv.first);//stoi(kv.first.substr(stell.length()+1,4));
+				    ki=stoi(kv.first.substr(stell.length()+1,4));
+				    if(ki==kincl){
+				    if(fabs(raan-kv.second)<esp){
+				        std::cout<<" hit "<<kv.first<<" "<<k<<" "<<kv.second<<std::endl;
+					newraan=false;
+					break;
+				    }
+				    k++;
+				    kmax=kmax>k?kmax:k;
+				    }
+				}
+			}
+			if(newraan){
+				    std::cout<<" new "<<kmax<<"  raan "<<raan<<" P"<<to_string(kmax)<<std::endl;
+			    k=kmax;
+			    satraan[stell+"I"+to_string(kincl)+"P"+to_string(k)]=raan;
+			    stellnode[stell+"I"+to_string(kincl)+"P"+to_string(k)]=new TreeNode("P"+to_string(k));
+			    stellnode[stell+"I"+to_string(kincl)]->addChild(stellnode[stell+"I"+to_string(kincl)+"P"+to_string(k)]);
+			}
+			stellnode[stell+"I"+to_string(kincl)+"P"+to_string(k)]->addChild(new TreeNode(orbmode+satcode,i,satobj));
+
+}
+void addmeo(cSatellite* sat,map<string,TreeNode*>& stellnode, map<string,double>& satraan,SatelliteObj* satobj,int i,
+	string stell,string orbmode,string satcode,string stype,double esp=0.5){
+    	    	        std::cout<<sat->Name()<<" inc "<<sat->Orbit().Inclination()<<" raan "<<sat->Orbit().RAAN()<<" size "<<satraan.size();
+    	    	        double raan = sat->Orbit().RAAN();
+    	            	bool newraan=true;
+    	            	int k=0;
+			int kmax=k;
+			for(const auto & kv: satraan){
+				//std::cout<< kv.first<<" -> "<<kv.second<<"  "<<kv.first.substr(stell.length()+1,4)<<std::endl;
+				if(kv.first.find(stell+"P")!=std::string::npos){
+				    k=stoi(kv.first.substr(stell.length()+1,4));
+				    if(fabs(raan-kv.second)<esp){
+				    std::cout<<" hit "<<kv.first<<" "<<k<<" "<<kv.second<<std::endl;
+					newraan=false;
+					break;
+				    }
+				    k++;
+				    kmax=kmax>k?kmax:k;
+				}
+			}
+			if(newraan){
+				    std::cout<<" new "<<kmax<<"  raan "<<raan<<" P"<<to_string(kmax)<<std::endl;
+			    k=kmax;
+			    satraan[stell+"P"+to_string(k)]=raan;
+			    stellnode[stell+"P"+to_string(k)]=new TreeNode(stype+"P"+to_string(k));
+			    stellnode[stell]->addChild(stellnode[stell+"P"+to_string(k)]);
+			}
+			stellnode[stell+"P"+to_string(k)]->addChild(new TreeNode(orbmode+satcode,i,satobj));
+
+}
 int main(int argc, char** argv)
 {
     osgEarth::initialize();
@@ -293,16 +596,16 @@ int main(int argc, char** argv)
         mapNode->addChild( app.targetPos.get() );
 
         ui::ControlCanvas* container = ui::ControlCanvas::getOrCreate(&viewer);
-        container->addChild(createUI(app));
+        //container->addChild(createUI(app));
+        ui::VBox* vbox = new VBox();
+        vbox->addControl(createUI(app));
+        VBox* satroot = new VBox();
+        //TreeNode* nodebd3 = new TreeNode("BEIDOU-3");
+        //satroot->addControl(nodebd3);
+        app.satlistpannel->addControl(satroot);
+        vbox->addControl(app.satlistpannel);
+        container->addChild(vbox);
 
-	/*MouseCoordsTool* tool = new MouseCoordsTool(mapNode);
-	LatLongFormatter formatter;
-	//tool->addCallback(new MouseCoordsLabelCallback(app.target, &formatter));
-	viewer.addEventHandler(tool);
-	CoordinateCollector* collector = new CoordinateCollector();
-	tool->addCallback(collector);
-
-	viewer.addEventHandler(new ClickHandler(collector,app.targetPos));*/
 	viewer.addEventHandler(new ClickHandler(mapNode,app.targetPos));
     // A lat/long SRS for specifying points.
     //const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
@@ -313,29 +616,122 @@ int main(int argc, char** argv)
 	CelestialBody sun = ephemeris->getSunPosition(t);
 	osg::Vec3d sunPos = sun.geocentric;
 	sunPos.normalize();
+	//TreeNode* nodebd3geo = new TreeNode("GEO");
+	//nodebd3->addChild(nodebd3geo);
+	//TreeNode* nodebd3igso = new TreeNode("IGSO");
+	//nodebd3->addChild(nodebd3igso);
+	//TreeNode* nodebd3meo = new TreeNode("MEO");
+	//nodebd3->addChild(nodebd3meo);
+	map<string,TreeNode*> stellnode;
+	map<string,double> satraan;
+	map<string,double> satincl;
+	//vector<TreeNode*> satplane;
+	int planenum=0;
 	for(int i=0;i<satlist.size();i++)
     	{
     	    cSatellite* sat = satlist[i];
-	    if(sat->Name().find("BEIDOU-3"/*"GPS"*/)!=string::npos){
-	    //if(sat->Name().find("POLAR"/*"BEIDOU-3 M1""GPS BIII-6"*/)!=string::npos){
-	    //if(sat->Name().find("QZS"/*"GPS BIII-6"*/)!=string::npos){
-	    //if(sat->Name().find("GPS BIIF")!=string::npos){
-		printf("%s\n",sat->Name().c_str());
-		SatelliteObj * satobj = new SatelliteObj(sat,mapNode,geode,t,sunPos,app.targetPos);
-		//root->addChild(satobj->boxTransform);
-		root->addChild(satobj->pat);
-		satobjmap[i]=satobj;
+	    string stell,orbmode,satcode;
+	    std::regex pattern("([^\\s]+)\\s+([^\\s]+)\\s+(\\([^\\a]+\\))");//BEIDOU COSMOS GPS
+    	    std::smatch match;
+    	    std::string input = sat->Name();
+	    //std::cout<<input<<":";
+    	    if(std::regex_search(input,match,pattern)){
+    	        //std::cout<<"regex:"<<input<<" res "<<match[1]<<" "<<match[2]<<" "<<match[3]<<std::endl;
+    	        stell=match[1];
+    	        orbmode=match[2];
+    	        satcode=match[3];
+    	    }else{
+		pattern="([^\\s]+)\\s+(\\((\\w+)[^\\a]+\\))";//GALLILEO QZSS NVS
+		if(std::regex_search(input,match,pattern)){
+		    stell = match[3];
+		    orbmode = match[1];
+		    satcode = match[2];
+		    if(stell=="NVS") stell="IRNSS";
+		}else{
+		    pattern="((\\w+)-\\w+)";
+		    if(std::regex_search(input,match,pattern)){
+                        stell = match[2];
+                        orbmode = match[1];
+                        satcode = "";
+		    }
+		}
 	    }
+    	        //std::cout<<stell<<"   |   "<<orbmode<<"   |   "<<satcode<<std::endl;
+    	    	if(stell=="BEIDOU-2"||stell=="BEIDOU-3")
+    	    	{
+		    if(stellnode[stell]==nullptr){
+		    	stellnode[stell]=new TreeNode(stell);
+			satroot->addControl(stellnode[stell]);
+		    	stellnode[stell+"GEO"]=new TreeNode("GEO");
+		    	stellnode[stell]->addChild(stellnode[stell+"GEO"]);
+		    	stellnode[stell+"IGSO"]=new TreeNode("IGSO");
+		    	stellnode[stell]->addChild(stellnode[stell+"IGSO"]);
+		    	stellnode[stell+"MEO"]=new TreeNode("MEO");
+		    	stellnode[stell]->addChild(stellnode[stell+"MEO"]);
+		    }
+    	    	    SatelliteObj * satobj = new SatelliteObj(sat,mapNode,geode,t,sunPos,app.targetPos);
+    	    	    root->addChild(satobj->pat);
+    	    	    satobjmap[i]=satobj;
+    	    	    if(orbmode.find("I")!=std::string::npos)
+    	    	    {
+    	    	        if(stell=="BEIDOU-2")
+			    addmeo(sat,stellnode,satraan,satobj,i,stell+"IGSO",orbmode,satcode,"IGSO");
+			else
+			    stellnode[stell+"IGSO"]->addChild(new TreeNode(orbmode+satcode,i,satobj));
+    	    	    }else if(orbmode.find("G")!=std::string::npos){
+    	    	        stellnode[stell+"GEO"]->addChild(new TreeNode(orbmode+satcode,i,satobj));
+    	    	    }else{
+			addmeo(sat,stellnode,satraan,satobj,i,stell+"MEO",orbmode,satcode,"MEO");
+    	    	    }
+
+    	    	}else if(stell=="COSMOS"||stell=="GPS"||stell=="GALILEO"||stell=="STARLINK"){
+		   if(stellnode[stell+"MEO"]==nullptr){
+                        stellnode[stell+"MEO"]=new TreeNode(stell);
+                        satroot->addControl(stellnode[stell+"MEO"]);
+		   }
+    	    	    SatelliteObj * satobj = new SatelliteObj(sat,mapNode,geode,t,sunPos,app.targetPos);
+    	    	    root->addChild(satobj->pat);
+		    if(stell=="STARLINK")
+		    	addleo(sat,stellnode,satraan,satobj,i,stell+"MEO",orbmode,satcode,"MEO",0.3,&satincl);
+		    else
+		    	addmeo(sat,stellnode,satraan,satobj,i,stell+"MEO",orbmode,satcode,"MEO");
+    	    	    satobjmap[i]=satobj;
+		}else if(stell=="QZSS"||stell=="IRNSS"){
+                   if(stellnode[stell+"GSO"]==nullptr){
+                        stellnode[stell+"GSO"]=new TreeNode(stell);
+                        satroot->addControl(stellnode[stell+"GSO"]);
+                   }
+                    SatelliteObj * satobj = new SatelliteObj(sat,mapNode,geode,t,sunPos,app.targetPos);
+                    root->addChild(satobj->pat);
+		    if(stell=="QZSS")
+		    	stellnode[stell+"GSO"]->addChild(new TreeNode(orbmode+satcode,i,satobj));
+		    else
+			addmeo(sat,stellnode,satraan,satobj,i,stell+"GSO",orbmode,satcode,"GSO");
+    	    	    satobjmap[i]=satobj;
+		//}else if(stell=="STARLINK"){
+
+		}else{
+			std::cout<<stell<<" "<<orbmode<<" "<<satcode<<std::endl;
+		    stell="Other";
+		    if(satcode.empty()) satcode=sat->Name();
+                   if(stellnode[stell+"GSO"]==nullptr){
+                        stellnode[stell+"GSO"]=new TreeNode(stell);
+                        satroot->addControl(stellnode[stell+"GSO"]);
+                   }
+                    SatelliteObj * satobj = new SatelliteObj(sat,mapNode,geode,t,sunPos,app.targetPos);
+                    root->addChild(satobj->pat);
+                    stellnode[stell+"GSO"]->addChild(new TreeNode(orbmode+satcode,i,satobj));
+                    satobjmap[i]=satobj;
+
+		}
 	}
-	//GeodeFinder finder;
-    //root->accept(finder);
 	root->addChild(geode);
 
-
+/*
 for (const auto& pair : satobjmap)
 {
   std::cout << "Key: " << pair.first << ", Value: " << pair.second->sat->Name() << std::endl;
-}
+}*/
 
 
         viewer.setSceneData( root );
