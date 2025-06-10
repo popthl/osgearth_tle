@@ -25,6 +25,7 @@ struct Showflags{
     bool _cov;
     bool _orbit;
     bool _label;
+    bool _model;
     double _scale;
     double _eleva;
     double _beamelev;
@@ -41,6 +42,7 @@ public:
     MapNode* mapNode;
     osg::ref_ptr<osg::Geometry> cov;//sat beam cone
     osg::ref_ptr<osg::Geometry> orbit;
+    osg::ref_ptr<osg::Geometry> mark;
     osgEarth::FeatureNode* featureNode;//sat beam coverage
     osg::ref_ptr<osg::Node> box;
     osg::ref_ptr<osg::MatrixTransform> wing;
