@@ -3,6 +3,7 @@
 #include <osg/BlendFunc>
 #include <osgEarth/FeatureNode>
 #include <osgEarth/GeoData>
+#include <osg/Point>
 
 osg::ref_ptr<osg::MatrixTransform> createRotatingSail(double angle);
 osg::ref_ptr<osg::Node> createColoredCube();
@@ -16,7 +17,7 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     _vis=true;
     //boxTransform = new osg::MatrixTransform;
     pat = new osg::PositionAttitudeTransform();
-    showflag._scale = 0.5;
+    showflag._scale = 0.1;
     showflag._eleva = 35;//deg
     showflag._beamelev = 75;//deg
     box = createColoredCube();
@@ -36,6 +37,15 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     osg::ref_ptr<osg::LineWidth> lineWidth = new osg::LineWidth;
     lineWidth->setWidth(2.0f);
     stateSet->setAttributeAndModes(lineWidth, osg::StateAttribute::ON);
+
+    mark = new osg::Geometry;
+    osg::ref_ptr<osg::Vec4Array> colors2 = new osg::Vec4Array;
+    colors2->push_back(osg::Vec4(0.0f, 1.0f, 1.0f, 1.0f));
+    mark->setColorArray(colors2);
+    osg::ref_ptr<osg::StateSet> stateSetm = mark->getOrCreateStateSet();
+    osg::ref_ptr<osg::Point> point = new osg::Point;
+    point->setSize(5.0f);
+    stateSetm->setAttributeAndModes(point.get(), osg::StateAttribute::ON);
 
     cov = new osg::Geometry;
     osg::ref_ptr<osg::Vec4Array> colors1 = new osg::Vec4Array;
@@ -57,13 +67,14 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
     featureNode = new osgEarth::FeatureNode(feature,style);
     mapNode->addChild(featureNode);
     //geode->addDrawable(orbit);
+    geode->addDrawable(mark);
     showflag._orbit=true;
     showflag._cone = true;
     showflag._cov = true;
     showflag._label = true;
     setposition(t0,sunPos);
 
-//printf("ori satgroup %d\n",satgroup->getNumDrawables());
+    //printf("ori satgroup %d\n",satgroup->getNumDrawables());
     mapNode->addChild(label);
     pat->addChild(box);
     pat->addChild(wing);
@@ -71,186 +82,208 @@ SatelliteObj::SatelliteObj(cSatellite* sattle,MapNode* mapnode,osg::ref_ptr<osg:
 void SatelliteObj::setvisible(bool vis){
     _vis=vis;
     if(_vis){
-	cov->setNodeMask(0xffffffff);
-	orbit->setNodeMask(0xffffffff);
-	box->setNodeMask(0xffffffff);
-	label->setNodeMask(0xffffffff);
-	wing->setNodeMask(0xffffffff);
-	featureNode->setNodeMask(0xffffffff);
+        if(showflag._cone)
+            cov->setNodeMask(0xffffffff);
+        if(showflag._orbit)
+            orbit->setNodeMask(0xffffffff);
+        mark->setNodeMask(0xffffffff);
+        if(showflag._model)
+            pat->setNodeMask(0xffffffff);
+        if(showflag._label)
+            label->setNodeMask(0xffffffff);
+        //wing->setNodeMask(0xffffffff);
+        if(showflag._cov)
+            featureNode->setNodeMask(0xffffffff);
     }
     else{
-	cov->setNodeMask(0);
-	orbit->setNodeMask(0);
-	box->setNodeMask(0);
-	label->setNodeMask(0);
-	wing->setNodeMask(0);
-	featureNode->setNodeMask(0);
+        cov->setNodeMask(0);
+        orbit->setNodeMask(0);
+        mark->setNodeMask(0);
+        pat->setNodeMask(0);
+        label->setNodeMask(0);
+        //wing->setNodeMask(0);
+        featureNode->setNodeMask(0);
     }
 }
 int SatelliteObj::setposition(DateTime t0,osg::Vec3d sunPos){
-if(!_vis)return 0;
+    if(!_vis)return 0;
     const SpatialReference* geoSRS = mapNode->getMapSRS()->getGeographicSRS();
     double Tcycle = 2*PI/sat->Orbit().MeanMotion()/60;
-osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
-osg::Vec3d llh0,xyz;
-DateTime t=t0;
-double h0;
-cJulian cjt0(t0.asTimeStamp());
-	vector<osg::Vec3d> pt;
-{
-	    cEciTime sateci = sat->PositionEci(cjt0);
-	    cEci pos = sateci;
-	    cGeo satgeo(pos, cjt0);
-	    llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
-            geoSRS->transformToWorld(llh0, xyz);
-            vertices->push_back(xyz);
-	    h0=satgeo.AltitudeKm();
-	    pt.push_back(llh0);
-}
-//printf("showflag %d %d %d, vertices %d satgroup %d\n",showflag._orbit,showflag._cone,showflag._cov,
-//    vertices->size(),satgroup->getNumDrawables());
-if(showflag._orbit){
-    //printf("Tcycle %f\n",Tcycle*3600);
-    //cout<<"t0: "<<t0.asCompactISO8601()<<endl;
-    int npoint = 3;
-    double ra = sat->Orbit().Apogee();
-    double rp = sat->Orbit().Perigee();
-
-    if(sat->Orbit().Eccentricity()>0.02){
-	npoint=40;
-	while(t<t0+Tcycle){
-	    double s = 1+5*(ra-h0)/(ra-rp);
-	    //printf("s %f\n",s);
-	    t=t+Tcycle/npoint/s;
-	    cJulian cjt(t.asTimeStamp());
-	    cEciTime sateci = sat->PositionEci(cjt);
-	    cEci pos = sateci;
-	    cGeo satgeo(pos, cjt0);
-	    //printf("llh: %lf %lf %lf\n",satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm());
-	    llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
-            geoSRS->transformToWorld(llh0, xyz);
-            vertices->push_back(xyz);
-	    h0=satgeo.AltitudeKm();
-	}
+    osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
+    osg::Vec3d llh0,xyz;
+    DateTime t=t0;
+    double h0;
+    cJulian cjt0(t0.asTimeStamp());
+    vector<osg::Vec3d> pt;
+    {
+        cEciTime sateci = sat->PositionEci(cjt0);
+        cEci pos = sateci;
+        cGeo satgeo(pos, cjt0);
+        llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
+        geoSRS->transformToWorld(llh0, xyz);
+        vertices->push_back(xyz);
+        h0=satgeo.AltitudeKm();
+        pt.push_back(llh0);
     }
-    else{
-	npoint=3;
+    //printf("showflag %d %d %d, vertices %d satgroup %d\n",showflag._orbit,showflag._cone,showflag._cov,
+    //    vertices->size(),satgroup->getNumDrawables());
+    if(showflag._orbit){
+        orbit->setNodeMask(0xffffffff);
+        //printf("Tcycle %f\n",Tcycle*3600);
+        //cout<<"t0: "<<t0.asCompactISO8601()<<endl;
+        int npoint = 3;
+        double ra = sat->Orbit().Apogee();
+        double rp = sat->Orbit().Perigee();
 
-	double dt = Tcycle/npoint;
-        //printf("Tcycle %f dt %f \n",Tcycle*60,dt);
+        if(sat->Orbit().Eccentricity()>0.02){
+            npoint=40;
+            while(t<t0+Tcycle){
+                double s = 1+5*(ra-h0)/(ra-rp);
+                //printf("s %f\n",s);
+                t=t+Tcycle/npoint/s;
+                cJulian cjt(t.asTimeStamp());
+                cEciTime sateci = sat->PositionEci(cjt);
+                cEci pos = sateci;
+                cGeo satgeo(pos, cjt0);
+                //printf("llh: %lf %lf %lf\n",satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm());
+                llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
+                geoSRS->transformToWorld(llh0, xyz);
+                vertices->push_back(xyz);
+                h0=satgeo.AltitudeKm();
+            }
+        }
+        else{
+            npoint=3;
 
-    	for(int i=1;i<npoint;i++)
-    	{
-	    t=t0+i*dt;
-	    //cout<<t.asCompactISO8601()<<endl;
-	    cJulian cjt(t.asTimeStamp());
-	    cEciTime sateci = sat->PositionEci(cjt);
-	    cEci pos = sateci;
-	    cGeo satgeo(pos, cjt0);
-            //printf("llh: %lf %lf %lf\n",satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm());
-	    llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
-	    pt.push_back(llh0);
-	    if(i>0){
-		Vec3dVector out;
-		TessellateOperator::tessellateGeo(pt[i-1],pt[i],20,GEOINTERP_GREAT_CIRCLE,out);
-		for(int k=0;k<out.size();k++){
-		    geoSRS->transformToWorld(out[k], xyz);
-		    vertices->push_back(xyz);
-		    //printf("%d : %lf %lf %lf\n",k,out[k].x(),out[k].y(),out[k].z());
-		}
-	    }
-	}
-	Vec3dVector out;
-	TessellateOperator::tessellateGeo(pt[npoint-1],pt[0],20,GEOINTERP_GREAT_CIRCLE,out);
-	for(int i=0;i<out.size();i++){
-	    geoSRS->transformToWorld(out[i], xyz);
-	    vertices->push_back(xyz);
-	    //printf("%d : %lf %lf %lf\n",i,out[i].x(),out[i].y(),out[i].z());
-	}
+            double dt = Tcycle/npoint;
+            //printf("Tcycle %f dt %f \n",Tcycle*60,dt);
+
+            for(int i=1;i<npoint;i++)
+            {
+                t=t0+i*dt;
+                //cout<<t.asCompactISO8601()<<endl;
+                cJulian cjt(t.asTimeStamp());
+                cEciTime sateci = sat->PositionEci(cjt);
+                cEci pos = sateci;
+                cGeo satgeo(pos, cjt0);
+                //printf("llh: %lf %lf %lf\n",satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm());
+                llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
+                pt.push_back(llh0);
+                if(i>0){
+                    Vec3dVector out;
+                    TessellateOperator::tessellateGeo(pt[i-1],pt[i],20,GEOINTERP_GREAT_CIRCLE,out);
+                    for(int k=0;k<out.size();k++){
+                        geoSRS->transformToWorld(out[k], xyz);
+                        vertices->push_back(xyz);
+                        //printf("%d : %lf %lf %lf\n",k,out[k].x(),out[k].y(),out[k].z());
+                    }
+                }
+            }
+            Vec3dVector out;
+            TessellateOperator::tessellateGeo(pt[npoint-1],pt[0],20,GEOINTERP_GREAT_CIRCLE,out);
+            for(int i=0;i<out.size();i++){
+                geoSRS->transformToWorld(out[i], xyz);
+                vertices->push_back(xyz);
+                //printf("%d : %lf %lf %lf\n",i,out[i].x(),out[i].y(),out[i].z());
+            }
+        }
+        //printf("vertices %d\n",vertices->size());
+        if(orbit->getNumPrimitiveSets()==0)
+            orbit->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::LINE_LOOP, 0, vertices->size()));
+        orbit->setVertexArray(vertices);
+        if(!satgroup->containsDrawable(orbit))
+            satgroup->addDrawable(orbit);
+    }else{
+        //satgroup->removeDrawable(orbit);
+        orbit->setNodeMask(0);
+        t=t0+Tcycle/6;
+        cJulian cjt(t.asTimeStamp());
+        cEciTime sateci = sat->PositionEci(cjt);
+        cEci pos = sateci;
+        cGeo satgeo(pos, cjt0);
+        llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
+        geoSRS->transformToWorld(llh0, xyz);
+        vertices->push_back(xyz);
+
     }
-    //printf("vertices %d\n",vertices->size());
-    if(orbit->getNumPrimitiveSets()==0)
-	orbit->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::LINE_LOOP, 0, vertices->size()));
-    orbit->setVertexArray(vertices);
-    if(!satgroup->containsDrawable(orbit))
-	satgroup->addDrawable(orbit);
-}else{
-	satgroup->removeDrawable(orbit);
-	    t=t0+Tcycle/6;
-	    cJulian cjt(t.asTimeStamp());
-	    cEciTime sateci = sat->PositionEci(cjt);
-	    cEci pos = sateci;
-	    cGeo satgeo(pos, cjt0);
-	    llh0=osg::Vec3d(satgeo.LongitudeDeg(),satgeo.LatitudeDeg(),satgeo.AltitudeKm()*1000);
-            geoSRS->transformToWorld(llh0, xyz);
-            vertices->push_back(xyz);
-
-}
     GeoPoint pos0;
     pos0.fromWorld(geoSRS,(*vertices)[0]);
     label->setPosition(pos0);
-if(showflag._label)
-	label->setNodeMask(0xffffffff);//Visible(showflag._label);
-else
-	label->setNodeMask(0);
-    setatt(vertices,sunPos);
-//printf("showflag %d %d %d, vertices %d satgroup %d\n",showflag._orbit,showflag._cone,showflag._cov,
-//    vertices->size(),satgroup->getNumDrawables());
-
-//-------------------add satbeam
-if(showflag._cone || showflag._cov){
-    vector<double>spos;
-    spos.push_back(pos0.x());
-    spos.push_back(pos0.y());
-    spos.push_back(pos0.z());
-    double alf = asin(6378140/pos0.z()*cos(showflag._beamelev*PI/180));
-//printf("llh: %lf %lf %lf\n",spos[0],spos[1],spos[2]);
-    bool icov;
-    GeoPoint tpos = target->getPosition();
-    vector<vector<double> > covpt = SatBeam(spos, alf, tpos.x(),tpos.y(),showflag._eleva);//pos0.x(), pos0.y());
-//printf("covpt %d\n",covpt.size());
-    osgEarth::Geometry* geom = new osgEarth::Polygon();
-    if(covpt.size()>0){
-	osg::ref_ptr<osg::Vec3Array> vertices1 = new osg::Vec3Array;
-	vertices1->push_back((*vertices)[0]);
-	for(int i=0;i<covpt.size();i++)
-	{
-	    osg::Vec3d pt(covpt[i][0],covpt[i][1],100000);
-	    geoSRS->transformToWorld(pt, xyz);
-	    vertices1->push_back(xyz);
-//printf("%d : %lf %lf %lf  %lf %lf %lf\n",i,xyz.x(),xyz.y(),xyz.z(),pt.x(),pt.y(),pt.z());
-	    if(showflag._cov)
-		geom->push_back(pt);
-	}
-	vertices1->push_back((*vertices1)[1]);
-    	if(cov->getNumPrimitiveSets()==0)
-	    cov->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::TRIANGLE_FAN, 0, vertices1->size()));
-    	cov->setVertexArray(vertices1);
-	icov = true;
-    }else{
-	icov=false;
+    if(showflag._label)
+        label->setNodeMask(0xffffffff);//Visible(showflag._label);
+    else
+        label->setNodeMask(0);
+    if(showflag._model){
+        setatt(vertices,sunPos);
+        pat->setNodeMask(0xffffffff);
     }
-    if(showflag._cone){
-	if(icov){
-	    if(!satgroup->containsDrawable(cov))
-		satgroup->addDrawable(cov);
-	}else
-		satgroup->removeDrawable(cov);
-    }else
-		satgroup->removeDrawable(cov);
-    osgEarth::Feature* feature = new osgEarth::Feature(geom,geoSRS);
-    featureNode->setFeature(feature);
-}else{
- if(showflag._cone==false){
-	satgroup->removeDrawable(cov);
- }
- if(showflag._cov==false){
-    osgEarth::Geometry* geom = new osgEarth::Polygon();
-    osgEarth::Feature* feature = new osgEarth::Feature(geom,geoSRS);
-    featureNode->setFeature(feature);
- }
-}
-//------------------------
+    else{
+        pat->setNodeMask(0);
+    }
+    osg::ref_ptr<osg::Vec3Array> vertices2 = new osg::Vec3Array;
+    vertices2->push_back((*vertices)[0]);
+    if(mark->getNumPrimitiveSets()==0)
+        mark->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::POINTS,0,1));
+    mark->setVertexArray(vertices2);
+
+    //printf("showflag %d %d %d, vertices %d satgroup %d\n",showflag._orbit,showflag._cone,showflag._cov,
+    //    vertices->size(),satgroup->getNumDrawables());
+
+    //-------------------add satbeam
+    if(showflag._cone || showflag._cov){
+        vector<double>spos;
+        spos.push_back(pos0.x());
+        spos.push_back(pos0.y());
+        spos.push_back(pos0.z());
+        //double alf = asin(6378.140/(pos0.z()+6378.140)*cos(showflag._beamelev*PI/180));
+        double alf = showflag._beamelev*PI/180;
+        //printf("llh: %lf %lf %lf alf %lf\n",spos[0],spos[1],spos[2],alf*180/PI);
+        bool icov;
+        GeoPoint tpos = target->getPosition();
+        vector<vector<double> > covpt = SatBeam(spos, alf, tpos.x(),tpos.y(),showflag._eleva);//pos0.x(), pos0.y());
+        //printf("covpt %d\n",covpt.size());
+        osgEarth::Geometry* geom = new osgEarth::Polygon();
+        if(covpt.size()>0){
+            osg::ref_ptr<osg::Vec3Array> vertices1 = new osg::Vec3Array;
+            vertices1->push_back((*vertices)[0]);
+            for(int i=0;i<covpt.size();i++)
+            {
+                osg::Vec3d pt(covpt[i][0],covpt[i][1],100000);
+                geoSRS->transformToWorld(pt, xyz);
+                vertices1->push_back(xyz);
+                //printf("%d : %lf %lf %lf  %lf %lf %lf\n",i,xyz.x(),xyz.y(),xyz.z(),pt.x(),pt.y(),pt.z());
+                if(showflag._cov)
+                    geom->push_back(pt);
+            }
+            vertices1->push_back((*vertices1)[1]);
+            if(cov->getNumPrimitiveSets()==0)
+                cov->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::TRIANGLE_FAN, 0, vertices1->size()));
+            cov->setVertexArray(vertices1);
+            icov = true;
+        }else{
+            icov=false;
+        }
+        if(showflag._cone){
+            if(icov){
+                if(!satgroup->containsDrawable(cov))
+                    satgroup->addDrawable(cov);
+            }else
+                satgroup->removeDrawable(cov);
+        }else
+            satgroup->removeDrawable(cov);
+        osgEarth::Feature* feature = new osgEarth::Feature(geom,geoSRS);
+        featureNode->setFeature(feature);
+    }else{
+        if(showflag._cone==false){
+            satgroup->removeDrawable(cov);
+        }
+        if(showflag._cov==false){
+            osgEarth::Geometry* geom = new osgEarth::Polygon();
+            osgEarth::Feature* feature = new osgEarth::Feature(geom,geoSRS);
+            featureNode->setFeature(feature);
+        }
+    }
+    //------------------------
     return vertices->size();
 }
 void SatelliteObj::setatt(osg::ref_ptr<osg::Vec3Array> vertices,osg::Vec3d sunPos)
@@ -259,49 +292,49 @@ void SatelliteObj::setatt(osg::ref_ptr<osg::Vec3Array> vertices,osg::Vec3d sunPo
     printf("satPos: %lf,%lf,%lf\n",(*vertices)[0].x()/(*vertices)[0].length(),(*vertices)[0].y()/(*vertices)[0].length(),(*vertices)[0].z()/(*vertices)[0].length());
     printf("satPos: %lf,%lf,%lf\n",(*vertices)[10].x()/(*vertices)[10].length(),(*vertices)[10].y()/(*vertices)[10].length(),(*vertices)[10].z()/(*vertices)[10].length());
 */
-   // rotate satellite body axis z, point to earth center
-   double dot=(*vertices)[0] * osg::Vec3(0,0,1);
-   double r=(*vertices)[0].length();
-   double angle = PI-std::acos(dot/r);
-   pat->setPosition((*vertices)[0]);
-   osg::Vec3 axisz=(*vertices)[0]^osg::Vec3(0,0,1);
-   osg::Quat rotation(angle, axisz);
-   //pat->setAttitude(rotation);
-   osg::Vec3 axisy0 = rotation*osg::Vec3(0,1,0);
-   osg::Vec3 axisx0 = rotation*osg::Vec3(1,0,0);
-   int id=1;
-   if(showflag._orbit)
-	id=10;
-   osg::Vec3 axisy=(*vertices)[0]^(*vertices)[id];//orbit normal direction
-   axisy.normalize();
-//    printf("axisy: %lf,%lf,%lf\n",axisy.x(),axisy.y(),axisy.z());
-   dot=axisy*axisy0;
-   double dot1 = axisy*axisx0;
-   angle = std::acos(dot);
-   if(std::isnan(angle))
-	angle=PI;
-   //printf("angle: %f,dot %f dot1:%f\n",angle*180/PI,dot,dot1);
-   if((dot>0 && dot1<0)||(dot<0 && dot1<0))
-	angle=-angle;
-   //body x align to move dirction
+    // rotate satellite body axis z, point to earth center
+    double dot=(*vertices)[0] * osg::Vec3(0,0,1);
+    double r=(*vertices)[0].length();
+    double angle = PI-std::acos(dot/r);
+    pat->setPosition((*vertices)[0]);
+    osg::Vec3 axisz=(*vertices)[0]^osg::Vec3(0,0,1);
+    osg::Quat rotation(angle, axisz);
+    //pat->setAttitude(rotation);
+    osg::Vec3 axisy0 = rotation*osg::Vec3(0,1,0);
+    osg::Vec3 axisx0 = rotation*osg::Vec3(1,0,0);
+    int id=1;
+    if(showflag._orbit)
+        id=10;
+    osg::Vec3 axisy=(*vertices)[0]^(*vertices)[id];//orbit normal direction
+    axisy.normalize();
+    //    printf("axisy: %lf,%lf,%lf\n",axisy.x(),axisy.y(),axisy.z());
+    dot=axisy*axisy0;
+    double dot1 = axisy*axisx0;
+    angle = std::acos(dot);
+    if(std::isnan(angle))
+        angle=PI;
+    //printf("angle: %f,dot %f dot1:%f\n",angle*180/PI,dot,dot1);
+    if((dot>0 && dot1<0)||(dot<0 && dot1<0))
+        angle=-angle;
+    //body x align to move dirction
 
-   //compute yaw and sail pan rotate angle in yaw steering mode
-   osg::Vec3 orbity=axisy^sunPos;
-   orbity.normalize();
-//    printf("orbity: %lf,%lf,%lf\n",orbity.x(),orbity.y(),orbity.z());
-   double sinu = (*vertices)[0] * orbity/r;
-   double beta = asin(axisy*sunPos);
-   double yaw = atan2(tan(beta),sinu);
-   angle-=yaw;
-   osg::Quat rotatey(angle,(*vertices)[0]);
-   pat->setAttitude(rotation*rotatey);
-   pat->setScale(osg::Vec3(showflag._scale*RADIUS, showflag._scale*RADIUS, showflag._scale*RADIUS));
-   double anglewing=acos(cos(beta)*sqrt(1-sinu*sinu));
+    //compute yaw and sail pan rotate angle in yaw steering mode
+    osg::Vec3 orbity=axisy^sunPos;
+    orbity.normalize();
+    //    printf("orbity: %lf,%lf,%lf\n",orbity.x(),orbity.y(),orbity.z());
+    double sinu = (*vertices)[0] * orbity/r;
+    double beta = asin(axisy*sunPos);
+    double yaw = atan2(tan(beta),sinu);
+    angle-=yaw;
+    osg::Quat rotatey(angle,(*vertices)[0]);
+    pat->setAttitude(rotation*rotatey);
+    pat->setScale(osg::Vec3(showflag._scale*RADIUS, showflag._scale*RADIUS, showflag._scale*RADIUS));
+    double anglewing=acos(cos(beta)*sqrt(1-sinu*sinu));
     dot = sunPos*(*vertices)[0];
-   if(dot>0)
-       anglewing=-anglewing;
-//printf("beta %f, yaw %f, sinu %f, anglewing %f\n",beta*180/PI,yaw*180/PI,sinu,anglewing*180/PI);
-   wing->setMatrix(osg::Matrix::rotate(anglewing, 0, 1, 0));
+    if(dot>0)
+        anglewing=-anglewing;
+    //printf("beta %f, yaw %f, sinu %f, anglewing %f\n",beta*180/PI,yaw*180/PI,sinu,anglewing*180/PI);
+    wing->setMatrix(osg::Matrix::rotate(anglewing, 0, 1, 0));
 }
 
 #define pi 3.14159265358979323846
@@ -614,7 +647,7 @@ vector<vector<double> > SatBeam(vector<double>spos, double alf, double tlon, dou
     //alf = alf*D2R;
     double x[3]={1,0,0};
     double z[3]={0,0,1};
-    double rs = spos[2]/6378140;//(spos[2]+6378.140)/6378.140;
+    double rs = 1+spos[2]/6378140;//(spos[2]+6378.140)/6378.140;
     double rc = sqrt(rs*rs-1);
     double llh[3]={spos[0]*D2R,spos[1]*D2R,rs};
     double xyz[3];
@@ -629,6 +662,7 @@ vector<vector<double> > SatBeam(vector<double>spos, double alf, double tlon, dou
     double alfts = angle(xyz,xyzt);
     double beta = atan2(rs*cos(alfts)-1,rs*sin(alfts));
     //if(alfts > acos(1/rs))
+    //cout<<"alfts "<<alfts*R2D<<" beta "<<beta*R2D<<" elev "<<elev<<" rs "<<rs<<endl;
     if( beta < elev*D2R)
     {
         //printf("can't cov target\n");
@@ -768,7 +802,7 @@ void readtlefile(string tlefile, vector<cSatellite*>* satlist){
             }else
                 linename=tmp;
         }
-    printf("read %d satellites\n",satlist->size());
+    std::cout<<"read satellites "<<satlist->size()<<std::endl;
 } 
 // 创建可旋转的帆板
 osg::ref_ptr<osg::MatrixTransform> createRotatingSail(double angle) {
