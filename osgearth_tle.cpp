@@ -466,7 +466,7 @@ void addleo(cSatellite* sat, map<string,double>& satincl, map<string,map<string,
         }
     }
     if(newincl){
-        //std::cout<<" new "<<kincl<<"  incline "<<incl<<" I"<<to_string(kincl);
+        std::cout<<" new "<<kincl<<"  incline "<<incl<<" I"<<to_string(kincl);
         satincl[stell+"I"+to_string(kincl)]=incl;
     }
     double raan = sat->Orbit().RAAN();
@@ -622,11 +622,12 @@ int main(int argc, char** argv)
         map<string,map<string,double> > satinclraan;
         map<int,string> satindex;
         //vector<TreeNode*> satplane;
+        string stell;
         int planenum=0;
         for(int i=0;i<satlist.size();i++)
         {
             cSatellite* sat = satlist[i];
-            string stell,orbmode,satcode;
+            string orbmode,satcode;
             std::regex pattern("([^\\s]+)\\s+([^\\s]+)\\s+(\\([^\\a]+\\))");//BEIDOU COSMOS GPS
             std::smatch match;
             std::string input = sat->Name();
@@ -653,7 +654,7 @@ int main(int argc, char** argv)
                     }
                 }
             }
-            //std::cout<<"regex: "<<stell<<"   |   "<<orbmode<<"   |   "<<satcode<<std::endl;
+            std::cout<<"regex: "<<stell<<"   |   "<<orbmode<<"   |   "<<satcode<<std::endl;
             if(stell=="BEIDOU-2"||stell=="BEIDOU-3")
             {
                 if(stellnode[stell]==nullptr){
@@ -704,7 +705,7 @@ int main(int argc, char** argv)
                 satobjmap[i]=satobj;
                 //}else if(stell=="STARLINK"){
                 
-            }else if(stell=="STARLINK"){
+            }else if(stell=="STARLINK"||stell=="QIANFAN"||stell=="DIGUI"){
                 addleo(sat,satincl,satinclraan,satindex,i,stell,orbmode,satcode);
             }
             else{
@@ -724,13 +725,15 @@ int main(int argc, char** argv)
         }
         if(satindex.size()>0){
             map<string,string> igp;
-            string stell="STARLINK";
-            stellnode[stell]=new TreeNode(stell);
-            satroot->addControl(stellnode[stell]);
-            cout<<"stellnode "<<stellnode.size()<<endl;
             for(const auto & kv: satinclraan){
-                //cout<<kv.first<<" "<<kv.second.size()<<endl;
-                stellnode[kv.first]=new TreeNode(kv.first.substr(8,2)+"/"+to_string((int)(satincl[kv.first]*180/PI)));
+                cout<<kv.first<<" "<<kv.second.size()<<endl;
+		//cout<<<<endl;
+		stell=kv.first.substr(0,kv.first.length()-2);
+		if(stellnode[stell]==nullptr){
+	            stellnode[stell]=new TreeNode(stell);
+        	    satroot->addControl(stellnode[stell]);
+		}
+                stellnode[kv.first]=new TreeNode(kv.first.substr(stell.length(),2)+"/"+to_string((int)(satincl[kv.first]*180/PI)));
                 stellnode[stell]->addChild(stellnode[kv.first]);
                 std::map<double,string> mraan;
                 for(const auto & kv1:kv.second){
