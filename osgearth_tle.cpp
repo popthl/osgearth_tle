@@ -622,12 +622,11 @@ int main(int argc, char** argv)
         map<string,map<string,double> > satinclraan;
         map<int,string> satindex;
         //vector<TreeNode*> satplane;
-        string stell;
         int planenum=0;
         for(int i=0;i<satlist.size();i++)
         {
             cSatellite* sat = satlist[i];
-            string orbmode,satcode;
+            string stell,orbmode,satcode;
             std::regex pattern("([^\\s]+)\\s+([^\\s]+)\\s+(\\([^\\a]+\\))");//BEIDOU COSMOS GPS
             std::smatch match;
             std::string input = sat->Name();
@@ -651,7 +650,14 @@ int main(int argc, char** argv)
                         stell = match[2];
                         orbmode = match[1];
                         satcode = "";
-                    }
+                    }else{
+						pattern="(\\w+)\\s+(\\w+)";
+						if(std::regex_search(input,match,pattern)){
+							stell = match[1];
+							satcode = match[2];
+							orbmode = match[1];
+						}
+					}
                 }
             }
             std::cout<<"regex: "<<stell<<"   |   "<<orbmode<<"   |   "<<satcode<<std::endl;
@@ -705,7 +711,8 @@ int main(int argc, char** argv)
                 satobjmap[i]=satobj;
                 //}else if(stell=="STARLINK"){
                 
-            }else if(stell=="STARLINK"||stell=="QIANFAN"||stell=="DIGUI"){
+            }else if(stell=="STARLINK"||stell=="QIANFAN"||stell=="DIGUI"||stell=="ONEWEB"||stell=="KUIPER"
+		||stell=="IRIDIUM"||stell=="ORBCOMM"||stell=="GLOBALSTAR"){
                 addleo(sat,satincl,satinclraan,satindex,i,stell,orbmode,satcode);
             }
             else{
@@ -728,7 +735,7 @@ int main(int argc, char** argv)
             for(const auto & kv: satinclraan){
                 cout<<kv.first<<" "<<kv.second.size()<<endl;
 		//cout<<<<endl;
-		stell=kv.first.substr(0,kv.first.length()-2);
+		string stell=kv.first.substr(0,kv.first.length()-2);
 		if(stellnode[stell]==nullptr){
 	            stellnode[stell]=new TreeNode(stell);
         	    satroot->addControl(stellnode[stell]);
